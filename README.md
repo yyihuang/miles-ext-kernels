@@ -28,10 +28,11 @@ Under `--use-miles-ext-kernels`, miles calls `miles_ext_kernels.add_arguments(pa
 | `gated_rmsnorm` (RMSNorm(x) * w * SiLU(z) over rows of 128: the GDN output norm; det + fast) | `--linear-attention-output-norm-backend cake` | `--cake-gated-rmsnorm-variant {det,fast}` | SM100a / SM103a | `tests/gated_rmsnorm` (CPU; `test_gated_rmsnorm_gpu.py` needs CUDA) |
 | `rmsnorm` (zero-centred RMSNorm x * rstd * (1 + w): the GDN input layernorm, hidden 256/512/1536/2048/4096/5120/6144; det + fast) | `--linear-attention-input-norm cake` | `--cake-rmsnorm-variant {det,fast}` | SM100a / SM103a | `tests/rmsnorm` (CPU; `test_rmsnorm_gpu.py` needs CUDA) |
 | `dense_gemm` (deterministic batched per-head projection GEMM and FP32 router gate GEMM, forward + backward) | `--batched-projection-gemm-backend cake`, `--moe-router-gemm-backend cake` (Megatron) | none | SM100a / SM103a | `tests/dense_gemm` (CPU; `test_batched_projection_gpu.py` and `test_router_gpu.py` need CUDA) |
+| `moe_grouped_gemm` (ragged BF16 MoE grouped GEMM, `det` and `fast`, forward + backward) | `--moe-grouped-gemm-backend cake` (torchtitan) | `--cake-moe-grouped-gemm-variant {det,fast}` | SM100a / SM103a | `tests/moe_grouped_gemm` (CPU; `test_moe_grouped_gemm_gpu.py` needs CUDA) |
 
 A package that ships two variants takes `--cake-<kernel>-variant {det,fast}`: `det` is bit-deterministic, `fast` is
 faster. Unset, it runs `fast`, or `det` under miles' `--deterministic-mode` (`miles_ext_kernels/_variant.py`). The
-`fast` variants of `dsa`, `mhc`, `conv1d`, `gated_rmsnorm` and `rmsnorm` reduce in a
+`fast` variants of `dsa`, `mhc`, `conv1d`, `gated_rmsnorm`, `rmsnorm` and `moe_grouped_gemm` reduce in a
 run-dependent order, so they are not bit-reproducible and `--deterministic-mode` rejects an explicit `fast`. The `gdn`
 `fast` runs in a fixed order: it repeats bit for bit run to run (its bits differ from `det`), so `--deterministic-mode`
 allows it. `kda` and `dense_gemm` ship `det` only; `gqa` ships one variant, not bit-reproducible, which
