@@ -28,8 +28,10 @@ def add_arguments(group) -> None:
         action="store_true",
         default=False,
         help=(
-            "Recompute w/u/h/v_new in the backward instead of keeping them on the autograd tape: same gradient bits, "
-            "less activation memory, more backward time. Only with --linear-attention-backend cake."
+            "Recompute w/u/h/v_new in the backward instead of keeping them on the autograd tape: less activation "
+            "memory, more backward time. det gives the same gradient bits; fast gives gradients within the BF16 "
+            "accuracy budgets of the saved backward. Either repeats bit for bit. Only with --linear-attention-backend "
+            "cake."
         ),
     )
 

@@ -3,9 +3,9 @@ feeds it.
 
 Against the FP64 token recurrence, the deterministic kernels and flash-linear-attention, output and every input gradient
 within the accuracy budgets of the package's own suite; bit for bit run to run, under PyTorch's deterministic
-algorithms and with the WY / state tensors recomputed in the backward; miles' strided q / k views give the bits of
-contiguous inputs; a call with a ``cp_context`` runs the deterministic kernels and says so once; the first call builds
-every library of the device's architecture.
+algorithms and with the WY / state tensors recomputed in the backward, where the recomputed backward stays within the
+budgets of the saved one; miles' strided q / k views give the bits of contiguous inputs; a call with a ``cp_context``
+runs the deterministic kernels and says so once; the first call builds every library of the device's architecture.
 
 The head pairs are the TP-local heads of Qwen3.5-27B at TP4 (4 key / 12 value heads) and of Qwen3.5-35B-A3B at TP1
 (16 / 32), on ragged multi-document layouts whose lengths are not multiples of the 64-token chunk. Needs a Blackwell
@@ -247,9 +247,17 @@ def test_fast_repeats_bit_for_bit(pair, route, monkeypatch):
     # miles' --deterministic-mode: no launch of the package raises PyTorch's alert, and the bits stay
     with _deterministic_algorithms():
         _assert_same_bits(_run(inputs, MILES_LAYOUT, route=route), first, "under deterministic algorithms")
-    # --cake-gdn-recompute-state: w / u / h / v_new recomputed in the backward, the same bits
+    # --cake-gdn-recompute-state: w / u / h / v_new recomputed in the backward. The recomputed backward repeats bit
+    # for bit, also under deterministic algorithms. Against the saved backward the package promises its accuracy
+    # budgets, not its bits (its own suite checks the recompute within the budgets only): on B200, for the (4, 12)
+    # pair on the device route, the recompute's register scan rounds a few v_new elements one BF16 ulp away from the
+    # forward's fused scan, and 9 dg elements move by at most 3e-7.
     monkeypatch.setattr(ops, "SAVE_STATE", False)
-    _assert_same_bits(_run(inputs, MILES_LAYOUT, route=route), first, "the recomputed backward")
+    recomputed = _run(inputs, MILES_LAYOUT, route=route)
+    _assert_same_bits(_run(inputs, MILES_LAYOUT, route=route), recomputed, "a second recomputed run")
+    with _deterministic_algorithms():
+        _assert_same_bits(_run(inputs, MILES_LAYOUT, route=route), recomputed, "recomputed, deterministic algorithms")
+    _assert_within(recomputed, first, "the recomputed backward vs the saved one")
 
 
 def test_a_cp_context_call_runs_det_and_says_so_once(monkeypatch, caplog):

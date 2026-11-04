@@ -34,8 +34,9 @@ The fast variant (:data:`VARIANT` ``= "fast"``, which ``miles_ext_kernels.gdn.co
 ``--cake-gdn-variant``) runs the same entry point on the vendored Cake non-deterministic package
 (``_vendor/cake/cake_gdn_train``, built and loaded by ``miles_ext_kernels.cake_native``).  Every launch of that package
 is fixed-order, so it repeats bit for bit run to run; it matches the deterministic kernels within the BF16 accuracy
-budgets, not bitwise.  It has no context parallelism: a call with a ``cp_context`` runs the deterministic kernels and
-says so once.
+budgets, not bitwise.  :data:`SAVE_STATE` applies to it too, but its recomputed backward matches the saved one within
+those budgets, not bitwise (it repeats its own bits).  It has no context parallelism: a call with a ``cp_context`` runs
+the deterministic kernels and says so once.
 """
 
 from __future__ import annotations
