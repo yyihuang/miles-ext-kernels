@@ -30,6 +30,7 @@ GIT = ["git", "-c", "user.name=synthetic", "-c", "user.email=synthetic@example.c
 VENDORED_FAMILIES: frozenset[str] = frozenset(
     {
         "conv1d",
+        "dense_gemm",
         "dsa",
         "gated_rmsnorm",
         "gdn",
