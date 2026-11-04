@@ -33,6 +33,7 @@ VENDORED_FAMILIES: frozenset[str] = frozenset(
         "dsa",
         "gated_rmsnorm",
         "gdn",
+        "gqa",
         "kda",
         "mhc",
         "rmsnorm",
