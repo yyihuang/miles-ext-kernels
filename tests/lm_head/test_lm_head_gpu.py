@@ -64,8 +64,11 @@ def built():
     """Every library of both variants (with the temperature forms) built up front, in parallel."""
     workers = min(16, len(os.sched_getaffinity(0)))
     for variant in VARIANTS:
-        ops.prebuild(variant=variant, temperature=True, max_workers=workers)
-        assert ops.prebuild(variant=variant, temperature=True) == []  # all cached now
+        libraries = ops.prebuild(variant=variant, temperature=True, max_workers=workers)
+        assert libraries and all(path.is_file() for path in libraries)
+        built = {path: path.stat().st_mtime_ns for path in libraries}
+        # all cached now: a second call returns the same libraries and rebuilds none of them
+        assert {path: path.stat().st_mtime_ns for path in ops.prebuild(variant=variant, temperature=True)} == built
 
 
 @pytest.fixture(autouse=True)

@@ -155,9 +155,9 @@ def prebuild(
     max_workers: int | None = None,
 ) -> list[Path]:
     """Build the libraries :func:`log_probs` of ``variant`` loads on ``device``'s architecture before the first call,
-    ``max_workers`` compiles at a time; with ``temperature`` also the temperature forms. Returns the libraries it
-    built (cached ones are skipped). Call it where the ``cake`` log-prob path is set up, so no rank compiles inside a
-    training step.
+    ``max_workers`` compiles at a time; with ``temperature`` also the temperature forms. Returns the cache paths of
+    the libraries, built now or found cached (a cached library is not compiled again). Call it where the ``cake``
+    log-prob path is set up, so no rank compiles inside a training step.
     """
     arch = device_arch(device)
     package = _package(_runs(variant, warn=False))
