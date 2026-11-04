@@ -25,8 +25,13 @@ F32_MAX_ABS_OVER_REF_ABSMAX = 1e-3
 ROUTER_REL_FRO_MAX = 2e-6
 REPEATS = 10
 # Top-k agreement is checked on the rows whose k-th and (k+1)-th FP64 logits are further apart than this (relative to
-# the largest logit): closer ties may order either way under any FP32 accumulation.
+# the largest logit): closer ties may order either way under any FP32 accumulation. Two logits swap only when they lie
+# within the sum of their errors; on B200 the largest logit error of these cases is 4.7e-6 of the largest logit, so the
+# margin is more than 10x the widest gap a correct FP32 sum can reorder.
 TOP_K_TIE_MARGIN = 1e-4
+# The share of rows that must be clear of such a tie for the check to cover the routing. It depends on the inputs only
+# (the FP64 logits): the random logits of 128-512 experts at this seed leave 98.2-100 % of the 1001 rows clear.
+TOP_K_MIN_CLEAR_ROWS = 0.95
 # The error of an FP32 dot product before its BF16 rounding, relative to the sum of its absolute products: chunked FP32
 # accumulation over K <= 7168 stays far below it.
 FP32_DOT_REL = 2.0**-16
@@ -66,7 +71,7 @@ def _assert_top_k_agrees(logits: torch.Tensor, expected: torch.Tensor) -> None:
     """The top-k experts of ``logits`` are those of the FP64 ``expected`` on every row without a near tie at k."""
     ranked = torch.topk(expected, TOP_K + 1, dim=1).values
     clear = (ranked[:, TOP_K - 1] - ranked[:, TOP_K]) > TOP_K_TIE_MARGIN * float(expected.abs().max())
-    assert int(clear.sum()) >= 0.99 * expected.shape[0], "too many near ties to check the routing"
+    assert int(clear.sum()) >= TOP_K_MIN_CLEAR_ROWS * expected.shape[0], "too many near ties to check the routing"
     top = torch.topk(logits.double(), TOP_K, dim=1).indices.sort(dim=1).values
     ref_top = torch.topk(expected, TOP_K, dim=1).indices.sort(dim=1).values
     assert torch.equal(top[clear], ref_top[clear])
