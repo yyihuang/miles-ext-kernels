@@ -195,14 +195,21 @@ def batched_projection(x: torch.Tensor, weight: torch.Tensor, *, weight_layout: 
     return _BatchedProjection.apply(x, weight, in_out)
 
 
+def _router_weight_operand(weight: torch.Tensor) -> torch.Tensor:
+    """The router weight ``[E, H]`` as the K1 ``B`` operand of the logits ``x @ weight.T``: ``weight.T`` stored
+    ``[H, E]`` with unit stride on ``E`` (N-major). K1 serves an FP32 output with a K-major ``A`` only for an N-major
+    ``B`` (its ``kn`` programs; it registers no ``kk`` program with FP32 output), so the forward copies the weight
+    (``E * H`` BF16 elements, small next to the activations) into that layout."""
+    return weight.t().contiguous()
+
+
 class _RouterGating(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
         backend, _, _ = _vendored()
         x2 = _k1_view(x.reshape(-1, x.shape[-1]))
-        weight = _k1_view(weight)
         logits = torch.empty(x2.shape[0], weight.shape[0], dtype=torch.float32, device=x.device)
-        backend.projection_det_forward(x2, weight, out=logits)
+        backend.dense_projection_det_gemm(x2, _router_weight_operand(weight), logits)
         ctx.save_for_backward(x2, weight)
         ctx.x_shape = x.shape
         return logits.view(*x.shape[:-1], weight.shape[0])
@@ -329,7 +336,7 @@ def prebuild_router(
     weight = _meta(num_experts, hidden_size)
     fp32 = torch.float32
     for tokens in token_counts:
-        plan(_meta(tokens, hidden_size), weight.t(), _meta(tokens, num_experts, dtype=fp32))
+        plan(_meta(tokens, hidden_size), _meta(hidden_size, num_experts), _meta(tokens, num_experts, dtype=fp32))
         g, x = _meta(tokens, num_experts, dtype=fp32), _meta(tokens, hidden_size, dtype=fp32)
         dx, dw = _meta(tokens, hidden_size, dtype=fp32), _meta(num_experts, hidden_size, dtype=fp32)
         for a, b, out in ((g, weight.float(), dx), (g.t(), x, dw)):  # the K2 input and weight gradients
