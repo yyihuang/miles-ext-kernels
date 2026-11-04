@@ -8,7 +8,7 @@ from argparse import ArgumentParser, Namespace
 
 from miles_ext_kernels.gdn import arguments as gdn_arguments
 
-# Each entry is a module exposing add_arguments(group) and validate_args(args).
+# Each entry is a module exposing add_arguments(group) and validate_args(args); importing them stays torch-free.
 _KERNEL_PACKAGES = (gdn_arguments,)
 
 
