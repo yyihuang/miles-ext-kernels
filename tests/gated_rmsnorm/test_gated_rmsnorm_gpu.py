@@ -72,9 +72,9 @@ def assert_bf16_close(got, want, *, what):
     floor = want.abs().max().item() * BF16_RTOL / 64
     err = (got.double() - want).abs()
     bad = err > want.abs() * BF16_RTOL + floor
-    assert not bad.any(), (
-        f"{what}: {int(bad.sum())} of {bad.numel()} beyond one BF16 ulp; worst {err.max().item():.3e}"
-    )
+    assert (
+        not bad.any()
+    ), f"{what}: {int(bad.sum())} of {bad.numel()} beyond one BF16 ulp; worst {err.max().item():.3e}"
 
 
 def assert_dw_within(dw, want, mag, *, what):

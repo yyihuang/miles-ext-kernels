@@ -150,8 +150,11 @@ def test_a_chunk_size_out_of_range_is_rejected(chunk_size):
         (dict(multi_lora_n_adapters=4), "does not support multi-LoRA"),
         (dict(lora_rank=8, target_modules="attn,unembed"), "does not support a LoRA adapter on the output layer"),
         (dict(lora_rank=8, target_modules="q_proj, lm_head"), "does not support a LoRA adapter on the output layer"),
-        (dict(lora_rank=8, target_modules=["language_model.lm_head"]), "LoRA adapter on the output layer"),
-        (dict(lora_rank=8, target_modules=["output_layer"]), "LoRA adapter on the output layer"),
+        (
+            dict(lora_rank=8, target_modules=["language_model.lm_head"]),
+            "does not support a LoRA adapter on the output layer",
+        ),
+        (dict(lora_rank=8, target_modules=["output_layer"]), "does not support a LoRA adapter on the output layer"),
         (dict(use_mup=True), "does not apply MuP's output logit scaling"),
     ],
 )

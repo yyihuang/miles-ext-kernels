@@ -269,9 +269,9 @@ def _assert_gate(result: dict, oracle: dict, baseline: dict, p: Problem, what: s
     assert errors["finite"], f"{what}: a non-finite output"
     for key, floor in GATE_FLOOR.items():
         if key in errors:
-            assert errors[key] <= GATE_MARGIN * baseline[key] + floor, (
-                f"{what} {key}: {errors[key]:.3e} vs the unchunked PyTorch path's {baseline[key]:.3e}"
-            )
+            assert (
+                errors[key] <= GATE_MARGIN * baseline[key] + floor
+            ), f"{what} {key}: {errors[key]:.3e} vs the unchunked PyTorch path's {baseline[key]:.3e}"
     assert errors["logp_ignored_zero"], f"{what}: logp of an ignored row is not 0"
     if "dX_ignored_zero" in errors:
         assert errors["dX_ignored_zero"], f"{what}: dX of an ignored row is not 0"

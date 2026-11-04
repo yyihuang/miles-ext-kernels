@@ -97,9 +97,9 @@ def test_router_matches_fp64_and_reruns_bit_identically(experts, hidden):
     for name, got, want, magnitude in gradients:
         assert got.dtype == torch.bfloat16 and got.shape == want.shape, name
         excess = (got.double() - want).abs() - _bf16_spacing(want) - FP32_DOT_REL * magnitude
-        assert float(excess.max()) <= 0, (
-            f"{name}: {int((excess > 0).sum())} elements off by more than one BF16 spacing"
-        )
+        assert (
+            float(excess.max()) <= 0
+        ), f"{name}: {int((excess > 0).sum())} elements off by more than one BF16 spacing"
 
 
 def test_router_refuses_what_the_programs_do_not_take():

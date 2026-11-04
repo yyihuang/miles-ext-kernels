@@ -169,9 +169,9 @@ def _assert_bf16(out: torch.Tensor, ref: torch.Tensor, label: str) -> None:
     assert out.dtype == BF16 and tuple(out.shape) == tuple(ref.shape), (label, out.dtype, tuple(out.shape))
     err = (out.to(F64) - ref).abs()
     bad = err > BF16_ATOL + BF16_RTOL * ref.abs()
-    assert torch.isfinite(out).all() and not bad.any(), (
-        f"{label}: {int(bad.sum())} of {bad.numel()} elements outside atol = rtol = 1e-2 (max abs err {float(err.max()):.3e})"
-    )
+    assert (
+        torch.isfinite(out).all() and not bad.any()
+    ), f"{label}: {int(bad.sum())} of {bad.numel()} elements outside atol = rtol = 1e-2 (max abs err {float(err.max()):.3e})"
 
 
 def _assert_fp32(out: torch.Tensor, ref: torch.Tensor, label: str, *, per_element: bool) -> None:

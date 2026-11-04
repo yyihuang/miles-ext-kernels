@@ -159,9 +159,9 @@ def assert_within(actual, expected, *, atol, rtol, label):
             index = int(outside.nonzero()[0])
             first = (start + index, a[index].item(), b[index].item())
         count += chunk
-    assert not count, (
-        f"{label}: {count} of {flat_actual.numel()} elements outside atol={atol} rtol={rtol}; first {first}"
-    )
+    assert (
+        not count
+    ), f"{label}: {count} of {flat_actual.numel()} elements outside atol={atol} rtol={rtol}; first {first}"
 
 
 def run(variant, x, w, cu, dy, policy="bf16"):
