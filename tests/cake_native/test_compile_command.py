@@ -6,14 +6,17 @@ package). The reference command is ``entry_flags`` / ``compile_command`` of Flas
 ``scripts/check_cake_build_manifests.py`` at the same commit, the plain-nvcc build of its vendored-package gate.
 """
 
+import fcntl
 import hashlib
 import importlib.util
 import json
+import logging
 import os
 import platform
 import re
 import shutil
 import sys
+import threading
 import types
 import uuid
 from collections.abc import Iterable
@@ -384,6 +387,58 @@ def test_a_failed_compile_raises_and_caches_nothing(package, toolkit, tvm_ffi):
     with pytest.raises(RuntimeError, match="synthetic failure"):
         spec.build()
     assert [path.name for path in spec.get_library_path().parent.iterdir()] == [spec.get_library_path().stem + ".lock"]
+
+
+@pytest.fixture
+def held_lock(monkeypatch):
+    """``held_lock(spec)``: another open file holding the build lock of ``spec``, with the wait shortened."""
+    monkeypatch.setattr(cake_native, "_LOCK_POLL_SECONDS", 0.01)
+    monkeypatch.setattr(cake_native, "_LOCK_LOG_SECONDS", 0.05)
+    monkeypatch.setattr(cake_native, "_LOCK_TIMEOUT_SECONDS", 0.5)
+    holders = []
+
+    def hold(spec) -> Any:
+        lock = spec.get_library_path().with_suffix(".lock")
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        holder = open(lock, "a")
+        fcntl.flock(holder, fcntl.LOCK_EX)
+        holders.append(holder)
+        return holder
+
+    yield hold
+    for holder in holders:
+        holder.close()
+
+
+def test_a_held_build_lock_is_reported_and_given_up_on(package, toolkit, tvm_ffi, held_lock, caplog):
+    nvcc = toolkit("13.0.88")
+    cake_native.install(package)
+    spec = package.jit_spec("prog_sm_100a")
+    held_lock(spec)
+    lock = spec.get_library_path().with_suffix(".lock")
+
+    with caplog.at_level(logging.WARNING, logger=cake_native.__name__):
+        with pytest.raises(RuntimeError, match=re.escape(f"for the build lock {lock}. Another process holds it")):
+            spec.build()
+
+    assert any(f"for the build lock {lock} of {spec.name}" in record.getMessage() for record in caplog.records)
+    assert _calls(nvcc) == []
+    assert not spec.get_library_path().exists()
+
+
+def test_a_build_waits_for_a_released_lock(package, toolkit, tvm_ffi, held_lock, monkeypatch):
+    monkeypatch.setattr(cake_native, "_LOCK_TIMEOUT_SECONDS", 60)
+    nvcc = toolkit("13.0.88")
+    cake_native.install(package)
+    spec = package.jit_spec("prog_sm_100a")
+    release = threading.Timer(0.1, held_lock(spec).close)
+    release.start()
+
+    path = spec.build()
+    release.join()
+
+    assert path.is_file()
+    assert len(_calls(nvcc)) == 1
 
 
 def test_prebuild_compiles_each_library_not_prebuilt_once(package, toolkit, tvm_ffi):

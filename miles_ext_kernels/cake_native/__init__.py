@@ -25,6 +25,9 @@ key hashes the flags, the full nvcc version, the tvm-ffi version and the machine
 CPU architectures in one shared checkout do not collide. All ranks may start a build at once: one compiles under a
 file lock into a temporary file and renames it into place, the others wait and load it.
 
+A waiting rank logs every 30 s and fails after 30 minutes. On a filesystem whose locks are cluster-wide (Lustre), the
+lock of a holder killed on another node can stay held for minutes after it died.
+
 Importing this module does not import torch or tvm_ffi.
 """
 
@@ -34,11 +37,13 @@ import fcntl
 import functools
 import hashlib
 import json
+import logging
 import os
 import platform
 import re
 import shutil
 import subprocess
+import time
 import uuid
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
@@ -52,6 +57,13 @@ _CUDA_CONSTRAINT = re.compile(r"(==|>=)([0-9]+)\.([0-9]+)")
 _NVCC_RELEASE = re.compile(r"release (\d+)\.(\d+)")
 _NVCC_BUILD = re.compile(r"\bV(\d+\.\d+\.\d+)")
 _STDERR_LINES = 40  # kept in the error of a failed compile
+# The wait for another process's build lock (held for one nvcc call): tried every _LOCK_POLL_SECONDS, logged every
+# _LOCK_LOG_SECONDS, given up after _LOCK_TIMEOUT_SECONDS.
+_LOCK_POLL_SECONDS = 1.0
+_LOCK_LOG_SECONDS = 30.0
+_LOCK_TIMEOUT_SECONDS = 30 * 60
+
+logger = logging.getLogger(__name__)
 
 
 class CudaVersion(NamedTuple):
@@ -128,6 +140,32 @@ def cache_dir() -> Path:
     return Path(root).expanduser() / "miles_ext_kernels"
 
 
+def _lock_exclusive(lock: Any, lock_path: Path, name: str) -> None:
+    """Take the exclusive flock of the open file ``lock``, waiting at most ``_LOCK_TIMEOUT_SECONDS``."""
+    start = time.monotonic()
+    logged = start
+    while True:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return
+        except BlockingIOError:
+            pass
+        now = time.monotonic()
+        if now - start >= _LOCK_TIMEOUT_SECONDS:
+            raise RuntimeError(
+                f"gave up building {name} after waiting {now - start:.0f} s for the build lock {lock_path}. "
+                "Another process holds it: a build of the library, or a process killed on another node whose lock "
+                "the filesystem has not released yet. Retry, or set TVM_FFI_CACHE_DIR to a node-local or per-job "
+                "directory."
+            )
+        if now - logged >= _LOCK_LOG_SECONDS:
+            logged = now
+            logger.warning(
+                "waiting %.0f s for the build lock %s of %s, held by another process", now - start, lock_path, name
+            )
+        time.sleep(_LOCK_POLL_SECONDS)
+
+
 class JitSpec:
     """One manifest library of a vendored package: its nvcc build into the cache and its tvm-ffi load.
 
@@ -197,8 +235,9 @@ class JitSpec:
         if path.is_file():
             return path
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path.with_suffix(".lock"), "a") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)  # released when the file closes
+        lock_path = path.with_suffix(".lock")
+        with open(lock_path, "a") as lock:
+            _lock_exclusive(lock, lock_path, self.name)  # released when the file closes
             if path.is_file():  # another rank built it while this one waited
                 return path
             # unique across hosts: a lock that is local to each node still lets two nodes build at once

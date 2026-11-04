@@ -40,6 +40,11 @@ file. `tests/cake_native/test_vendored.py` checks every vendored tree against it
 tvm-ffi (`apache-tvm-ffi>=0.1.11,<0.2`); FlashInfer itself is not needed. Libraries are cached under
 `${TVM_FFI_CACHE_DIR:-~/.cache/tvm-ffi}/miles_ext_kernels/`, never in the package directory.
 
+One rank builds each library under a file lock next to it; the others wait, log every 30 s and fail after
+30 minutes. On a filesystem whose locks are cluster-wide, such as Lustre, a rank killed on another node can leave
+its lock held for minutes. For multi-node jobs, prefer a node-local or per-job `TVM_FFI_CACHE_DIR`; each such
+directory builds the libraries again.
+
 ## Adding a kernel
 
 1. PR here: the package under `miles_ext_kernels/<kernel>/`, its arguments in `add_arguments` / `validate_args`
