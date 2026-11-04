@@ -15,6 +15,15 @@ submodule and enabled by miles' `--use-miles-ext-kernels`.
 Under `--use-miles-ext-kernels`, miles calls `miles_ext_kernels.add_arguments(parser)` before parsing and
 `miles_ext_kernels.validate_args(args)` from `miles_validate_args`. Without the flag nothing here is imported.
 
+## Kernels
+
+| package | miles backend switch | arguments | GPUs | tests |
+|---|---|---|---|---|
+| `gdn` (deterministic chunked gated delta rule, forward + backward) | `--linear-attention-backend cake` | `--cake-gdn-recompute-state` | SM100a / SM103a | `tests/gdn` (CPU; `test_gdn_wiring.py` needs CUDA) |
+
+A package applies its parsed arguments in `configure(args)`; miles calls it where it builds a layer on the `cake`
+backend (`miles_ext_kernels.gdn.configure`).
+
 ## Adding a kernel
 
 1. PR here: the package under `miles_ext_kernels/<kernel>/`, its arguments in `add_arguments` / `validate_args`
