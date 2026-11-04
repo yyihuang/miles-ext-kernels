@@ -31,7 +31,7 @@ assert loaded == ["miles_ext_kernels.gdn.arguments"], loaded
 def _registry_sources() -> set[str]:
     sources = set()
     for record in json.loads((GDN / "registry.json").read_text()).values():
-        sources.update(record["sources"])
+        sources.update(record.get("sources", ()))  # a stage built differently per arch has them in per_arch only
         for per_arch in (record.get("per_arch") or {}).values():
             sources.update(per_arch.get("sources", ()))
     return sources
