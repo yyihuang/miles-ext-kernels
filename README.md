@@ -23,6 +23,7 @@ Under `--use-miles-ext-kernels`, miles calls `miles_ext_kernels.add_arguments(pa
 | `kda` (deterministic packed KDA chunked forward + backward: raw forget gate and q/k L2 norm in the kernels, 1-64 heads) | `--kda-backend cake` | none | SM100a / SM103a | `tests/kda` (CPU; `test_kda_gpu.py` needs CUDA, its fla parity rows need fla) |
 | `dsa` (DSA sparse-MLA attention forward + backward, lightning-indexer scores; variants det and fast) | `--dsa-attention-backend cake` | `--cake-dsa-variant {det,fast}`, `--cake-dsa-bwd-workspace-bytes`, `--cake-dsa-lazy-build` | SM100a / SM103a | `tests/dsa` (CPU: `test_arguments.py`, `test_registry.py`; `test_dispatch.py` needs torch; `test_dsa_gpu.py` needs SM100a/SM103a) |
 | `mhc` (Cake four-stream mHC hyper connection: prepare, finish, stream-mean head; det and fast) | `--mhc-backend cake` | `--cake-mhc-variant {det,fast}` | SM100a / SM103a | `tests/mhc` (CPU: `test_arguments.py`, `test_vendored_routes.py`; `test_mhc_gpu.py` needs SM100a / SM103a) |
+| `gqa` (packed causal GQA attention, head dim 256, forward + backward; dQ is summed with FP32 atomics, so it is not bit-reproducible) | `--full-attention-backend cake` | none (the cake backend is rejected under `--deterministic-mode`) | SM100a / SM103a | `tests/gqa` (CPU; `test_gqa_gpu.py` needs CUDA) |
 | `conv1d` (packed causal depthwise conv1d + SiLU, kernel size 4: the GDN / KDA short convs; det + fast) | `--linear-attention-conv-backend cake` | `--cake-conv1d-variant {det,fast}`, `--cake-conv1d-silu-grad-preactivation {bf16,fp32}` | SM100a / SM103a | `tests/conv1d` (CPU; `test_conv1d_gpu.py` needs CUDA) |
 | `gated_rmsnorm` (RMSNorm(x) * w * SiLU(z) over rows of 128: the GDN output norm; det + fast) | `--linear-attention-output-norm-backend cake` | `--cake-gated-rmsnorm-variant {det,fast}` | SM100a / SM103a | `tests/gated_rmsnorm` (CPU; `test_gated_rmsnorm_gpu.py` needs CUDA) |
 | `rmsnorm` (zero-centred RMSNorm x * rstd * (1 + w): the GDN input layernorm, hidden 256/512/1536/2048/4096/5120/6144; det + fast) | `--linear-attention-input-norm cake` | `--cake-rmsnorm-variant {det,fast}` | SM100a / SM103a | `tests/rmsnorm` (CPU; `test_rmsnorm_gpu.py` needs CUDA) |
@@ -32,7 +33,8 @@ faster. Unset, it runs `fast`, or `det` under miles' `--deterministic-mode` (`mi
 `fast` variants of `dsa`, `mhc`, `conv1d`, `gated_rmsnorm` and `rmsnorm` reduce in a
 run-dependent order, so they are not bit-reproducible and `--deterministic-mode` rejects an explicit `fast`. The `gdn`
 `fast` runs in a fixed order: it repeats bit for bit run to run (its bits differ from `det`), so `--deterministic-mode`
-allows it. `kda` ships `det` only. A call that `fast` does not serve runs `det` and logs it once.
+allows it. `kda` ships `det` only; `gqa` ships one variant, not bit-reproducible, which
+`--deterministic-mode` rejects. A call that `fast` does not serve runs `det` and logs it once.
 
 A package applies its parsed arguments in `configure(args)`; miles calls it where it builds a layer on the `cake`
 backend (`miles_ext_kernels.gdn.configure`). miles keeps the values of the arguments registered here in one typed
