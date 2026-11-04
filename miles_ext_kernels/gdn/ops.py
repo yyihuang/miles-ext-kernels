@@ -29,6 +29,13 @@ Context parallelism reuses FLA v0.5.2's ``fla.ops.cp`` pre-processing exactly
 (``chunk_gated_delta_rule_fwd_h_pre_process``, ``compress_h0``, ``expand_h0``,
 ``chunk_gated_delta_rule_bwd_dhu_pre_process``), so ``build_gdn_cp_context`` semantics are
 unchanged.  Those helpers are only imported when a ``cp_context`` is supplied.
+
+The fast variant (:data:`VARIANT` ``= "fast"``, which ``miles_ext_kernels.gdn.configure`` sets from
+``--cake-gdn-variant``) runs the same entry point on the vendored Cake non-deterministic package
+(``_vendor/cake/cake_gdn_train``, built and loaded by ``miles_ext_kernels.cake_native``).  Every launch of that package
+is fixed-order, so it repeats bit for bit run to run; it matches the deterministic kernels within the BF16 accuracy
+budgets, not bitwise.  It has no context parallelism: a call with a ``cp_context`` runs the deterministic kernels and
+says so once.
 """
 
 from __future__ import annotations
@@ -42,6 +49,7 @@ from typing import Any
 
 import torch
 
+from .._variant import warn_det_fallback
 from ._jit import MODULES, device_arch, kernel, launcher, prebuild
 
 __all__ = [
@@ -72,8 +80,12 @@ SAVE_STATE = True
 # ``WORKSPACES = FreshWorkspaces()`` (the pool object is chosen at import time), e.g. with ``monkeypatch.setattr``.
 HOST_CACHE = True
 # Build every stage on the first call on a device (:func:`_jit.prebuild`) so no stage compiles inside a later step;
-# read at call time.
+# read at call time.  The fast variant builds every library of its package for the device's architecture the same way.
 PREBUILD = True
+# The kernels :func:`chunk_gated_delta_rule` runs: "det" (this module's kernels) or "fast" (the vendored Cake
+# non-deterministic package); read at call time.  ``miles_ext_kernels.gdn.configure`` sets it from the resolved
+# ``--cake-gdn-variant``.
+VARIANT = "det"
 
 
 # --------------------------------------------------------------------------- #
@@ -1959,6 +1971,64 @@ class ChunkGatedDeltaRuleFunction(torch.autograd.Function):
         return dq, dk, dv, dg, dbeta, None, dh0, None, None, None, None, None
 
 
+# --------------------------------------------------------------------------- #
+# fast variant: the vendored Cake non-deterministic package
+# --------------------------------------------------------------------------- #
+@cache
+def _fast_package():
+    """The vendored ``cake_gdn_train`` package, its libraries built and loaded through ``cake_native``."""
+    from .. import cake_native
+    from ._vendor.cake import cake_gdn_train
+
+    cake_native.install(cake_gdn_train.cake_build)
+    return cake_gdn_train
+
+
+def _fast_libraries(arch: str) -> list[str]:
+    """The ``build.json`` libraries of the fast package for ``arch``."""
+    entries = _fast_package().cake_build.libraries_by_name()
+    return [name for name, entry in entries.items() if entry["arch"] == arch]
+
+
+@cache
+def _fast_prebuild(arch: str) -> None:
+    """Build every library of the fast package for ``arch`` on the first fast call, so none compiles inside a later
+    step (the plan, and with it the stages a call launches, depends on the layout)."""
+    from .. import cake_native
+
+    cake_native.prebuild(_fast_package().cake_build, _fast_libraries(arch))
+
+
+def _fast_chunk_gated_delta_rule(
+    q, k, v, g, beta, scale, initial_state, output_final_state, cu_seqlens, cu_seqlens_cpu, use_qk_l2norm_in_kernel
+):
+    """The fast package's ``chunk_gated_delta_rule`` on SM100a / SM103a, with this module's :data:`SAVE_STATE`.
+
+    ``cu_seqlens_cpu`` selects the package's host-table route as it selects the deterministic kernels' host table.
+    The package makes strided q / k / v contiguous itself.
+    """
+    index = q.device.index if q.device.index is not None else torch.cuda.current_device()
+    arch = _arch_of(index)  # the deterministic kernels' architectures: SM100a / SM103a
+    package = _fast_package()
+    if PREBUILD:
+        _fast_prebuild(arch)
+    return package.chunk_gated_delta_rule(
+        q,
+        k,
+        v,
+        g,
+        beta,
+        scale=scale,
+        initial_state=initial_state,
+        output_final_state=output_final_state,
+        cu_seqlens=cu_seqlens,
+        cu_seqlens_cpu=cu_seqlens_cpu,
+        use_qk_l2norm_in_kernel=use_qk_l2norm_in_kernel,
+        save_state=SAVE_STATE,
+        deterministic=False,
+    )
+
+
 def chunk_gated_delta_rule(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -1975,7 +2045,7 @@ def chunk_gated_delta_rule(
     chunk_size: int = 64,
     **unsupported: Any,
 ):
-    """FLA v0.5.2 ``chunk_gated_delta_rule`` signature on the deterministic kernels.
+    """FLA v0.5.2 ``chunk_gated_delta_rule`` signature on the kernels of :data:`VARIANT`.
 
     Supported: ``[B, T, H, K]`` q/k and ``[B, T, HV, V]`` v with ``K = V = 128`` and ``HV % H == 0``,
     BF16 q/k/v, packed varlen via ``cu_seqlens`` (``B = 1``), FP32 ``initial_state`` /
@@ -1986,12 +2056,13 @@ def chunk_gated_delta_rule(
     ``cu_seqlens_cpu`` (the same boundaries on the host: a tuple of ints such as Megatron's
     ``packed_seq_params.cu_seqlens_host``, or a CPU tensor) selects the exact per-layout chunk table that
     every layer of the micro-batch shares; without it the table is built on the device per call.
+
+    ``VARIANT == "fast"`` runs the vendored non-deterministic package, except for a call with a ``cp_context``: the
+    package has no context parallelism, so that call runs the deterministic kernels (logged once).
     """
     for name, value in unsupported.items():
         if value not in (None, False):
-            raise NotImplementedError(
-                f"chunk_gated_delta_rule: {name}={value!r} is not supported by the deterministic kernels"
-            )
+            raise NotImplementedError(f"chunk_gated_delta_rule: {name}={value!r} is not supported by the Cake kernels")
     if chunk_size != CHUNK:
         raise NotImplementedError(f"chunk_gated_delta_rule: chunk_size must be {CHUNK}")
     if q.dtype != torch.bfloat16 or k.dtype != torch.bfloat16 or v.dtype != torch.bfloat16:
@@ -2002,6 +2073,22 @@ def chunk_gated_delta_rule(
         g = g.float()
     if scale is None:
         scale = 1.0 / math.sqrt(q.shape[-1])
+    if VARIANT == "fast":
+        if cp_context is None:
+            return _fast_chunk_gated_delta_rule(
+                q,
+                k,
+                v,
+                g,
+                beta,
+                float(scale),
+                initial_state,
+                output_final_state,
+                cu_seqlens,
+                cu_seqlens_cpu,
+                use_qk_l2norm_in_kernel,
+            )
+        warn_det_fallback("gdn", "context parallelism")
     if cu_seqlens is not None and cu_seqlens_cpu is None and cp_context is not None:
         cu_seqlens_cpu = getattr(cp_context, "cu_seqlens_cpu", None)
     return ChunkGatedDeltaRuleFunction.apply(
