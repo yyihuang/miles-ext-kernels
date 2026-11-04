@@ -25,9 +25,21 @@ DET = "flashinfer/cake_synth_det_backend"
 GIT = ["git", "-c", "user.name=synthetic", "-c", "user.email=synthetic@example.com", "-c", "commit.gpgsign=false"]
 
 
+# Every family with a committed _vendor/ tree. The commit that vendors a family's Cake packages adds it here, so a
+# tree that was never committed fails in CI rather than leaving nothing to check.
+VENDORED_FAMILIES: frozenset[str] = frozenset()
+
+
+def test_the_vendored_families_are_the_expected_ones():
+    assert {family.name for family in vendor_cake.vendored_families()} == VENDORED_FAMILIES
+
+
 def test_every_vendored_family_matches_its_provenance():
+    families = vendor_cake.vendored_families()
+    if not families:
+        pytest.skip("no family vendors Cake packages yet")
     # one entry per family that vendors packages; the tests below exercise the checker itself
-    findings = {family.name: vendor_cake.check_family(family) for family in vendor_cake.vendored_families()}
+    findings = {family.name: vendor_cake.check_family(family) for family in families}
 
     assert {family: problems for family, problems in findings.items() if problems} == {}
 
@@ -230,3 +242,8 @@ def test_the_command_line_vendors_and_checks(flashinfer, tmp_path, capsys):
     (repo / "miles_ext_kernels/synth/_vendor/cake_synth_det_backend/csrc/prog.cu").write_bytes(b"// edited\n")
     assert vendor_cake.main(["--repo-root", str(repo), "--check", "synth"]) == 1
     assert "synth: ok" in capsys.readouterr().out
+
+
+def test_the_command_line_says_when_there_is_nothing_to_check(tmp_path, capsys):
+    assert vendor_cake.main(["--repo-root", str(tmp_path), "--check"]) == 0
+    assert capsys.readouterr().out == "nothing to check: no miles_ext_kernels/*/_vendor/ tree\n"

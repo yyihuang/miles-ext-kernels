@@ -366,6 +366,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.package:
             parser.error("--check does not vendor; drop --package")
         families = [args.repo_root / PACKAGE_ROOT / name for name in args.check] or vendored_families(args.repo_root)
+        if not families:
+            print(f"nothing to check: no {PACKAGE_ROOT}/*/_vendor/ tree")
     else:
         if not (args.fi_checkout and args.fi_commit and args.package):
             parser.error("vendoring needs --fi-checkout, --fi-commit and at least one --package")
