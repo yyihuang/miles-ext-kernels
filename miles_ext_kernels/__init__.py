@@ -11,6 +11,7 @@ from miles_ext_kernels.dsa import arguments as dsa_arguments
 from miles_ext_kernels.gated_rmsnorm import arguments as gated_rmsnorm_arguments
 from miles_ext_kernels.gdn import arguments as gdn_arguments
 from miles_ext_kernels.kda import arguments as kda_arguments
+from miles_ext_kernels.mhc import arguments as mhc_arguments
 from miles_ext_kernels.rmsnorm import arguments as rmsnorm_arguments
 
 # Each entry is a module exposing add_arguments(group) and validate_args(args); importing them stays torch-free.
@@ -18,6 +19,7 @@ _KERNEL_PACKAGES = (
     gdn_arguments,
     kda_arguments,
     dsa_arguments,
+    mhc_arguments,
     conv1d_arguments,
     gated_rmsnorm_arguments,
     rmsnorm_arguments,
