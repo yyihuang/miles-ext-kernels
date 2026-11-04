@@ -57,7 +57,7 @@ CAKE_BUILD_BLOB = "00756137eb159e30a77907eda84fd245123d87ea"
 BUILD_SCHEMA = "cake-build/1"
 REQUIRED_ARCHES = frozenset({"sm_100a", "sm_103a"})
 # family -> package-relative modules that may read the environment (never imported by this repo)
-ENV_READ_ALLOWED: dict[str, frozenset[str]] = {}
+ENV_READ_ALLOWED: dict[str, frozenset[str]] = {"conv1d": frozenset({"kcp.py"})}
 
 _FAMILY = re.compile(r"[a-z][a-z0-9_]*")
 _PARENTS = {"flashinfer": "", "flashinfer/experimental": "", "flashinfer/experimental/cake": "cake"}
