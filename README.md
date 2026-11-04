@@ -15,6 +15,21 @@ submodule and enabled by miles' `--use-miles-ext-kernels`.
 Under `--use-miles-ext-kernels`, miles calls `miles_ext_kernels.add_arguments(parser)` before parsing and
 `miles_ext_kernels.validate_args(args)` from `miles_validate_args`. Without the flag nothing here is imported.
 
+## Kernels
+
+| package | miles backend switch | arguments | GPUs | tests |
+|---|---|---|---|---|
+| `gdn` (chunked gated delta rule, forward + backward: `det` is the bit-deterministic render, the only variant with context parallelism; `fast` is the vendored Cake non-deterministic package `cake_gdn_train`, fixed-order, so it repeats bit for bit and `--deterministic-mode` allows an explicit `fast`; a `cp_context` call runs `det`) | `--linear-attention-backend cake` | `--cake-gdn-variant {det,fast}`, `--cake-gdn-recompute-state` | SM100a / SM103a | `tests/gdn` (CPU; `test_gdn_wiring.py`, `test_fla_parity.py` and `test_gdn_fast_gpu.py` need CUDA) |
+
+A package that ships two variants takes `--cake-<kernel>-variant {det,fast}`: `det` is bit-deterministic, `fast` is
+faster. Unset, it runs `fast`, or `det` under miles' `--deterministic-mode` (`miles_ext_kernels/_variant.py`). The
+`gdn` `fast` runs in a fixed order: it repeats bit for bit run to run (its bits differ from `det`), so
+`--deterministic-mode` allows it. A call that `fast` does not serve runs `det` and logs it once.
+
+A package applies its parsed arguments in `configure(args)`; miles calls it where it builds a layer on the `cake`
+backend (`miles_ext_kernels.gdn.configure`). miles keeps the values of the arguments registered here in one typed
+field of its configuration and passes `configure` a namespace holding just those values.
+
 ## Vendored Cake packages
 
 Most kernels are FlashInfer's Cake packages, vendored byte-identical under `miles_ext_kernels/<kernel>/_vendor/` by

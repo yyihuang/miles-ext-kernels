@@ -6,8 +6,10 @@ dispatch seam. Each kernel package here owns its own arguments and validates the
 
 from argparse import ArgumentParser, Namespace
 
+from miles_ext_kernels.gdn import arguments as gdn_arguments
+
 # Each entry is a module exposing add_arguments(group) and validate_args(args).
-_KERNEL_PACKAGES = ()
+_KERNEL_PACKAGES = (gdn_arguments,)
 
 
 def add_arguments(parser: ArgumentParser) -> None:
