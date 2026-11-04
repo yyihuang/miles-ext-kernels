@@ -23,11 +23,12 @@ Under `--use-miles-ext-kernels`, miles calls `miles_ext_kernels.add_arguments(pa
 | `kda` (deterministic packed KDA chunked forward + backward: raw forget gate and q/k L2 norm in the kernels, 1-64 heads) | `--kda-backend cake` | none | SM100a / SM103a | `tests/kda` (CPU; `test_kda_gpu.py` needs CUDA, its fla parity rows need fla) |
 | `conv1d` (packed causal depthwise conv1d + SiLU, kernel size 4: the GDN / KDA short convs; det + fast) | `--linear-attention-conv-backend cake` | `--cake-conv1d-variant {det,fast}`, `--cake-conv1d-silu-grad-preactivation {bf16,fp32}` | SM100a / SM103a | `tests/conv1d` (CPU; `test_conv1d_gpu.py` needs CUDA) |
 | `gated_rmsnorm` (RMSNorm(x) * w * SiLU(z) over rows of 128: the GDN output norm; det + fast) | `--linear-attention-output-norm-backend cake` | `--cake-gated-rmsnorm-variant {det,fast}` | SM100a / SM103a | `tests/gated_rmsnorm` (CPU; `test_gated_rmsnorm_gpu.py` needs CUDA) |
+| `rmsnorm` (zero-centred RMSNorm x * rstd * (1 + w): the GDN input layernorm, hidden 256/512/1536/2048/4096/5120/6144; det + fast) | `--linear-attention-input-norm cake` | `--cake-rmsnorm-variant {det,fast}` | SM100a / SM103a | `tests/rmsnorm` (CPU; `test_rmsnorm_gpu.py` needs CUDA) |
 
 A package that ships two variants takes `--cake-<kernel>-variant {det,fast}`: `det` is bit-deterministic, `fast` is
 faster. Unset, it runs `fast`, or `det` under miles' `--deterministic-mode` (`miles_ext_kernels/_variant.py`). The
-`fast` variants of `conv1d` and `gated_rmsnorm` reduce in a run-dependent order, so they are not
-bit-reproducible and `--deterministic-mode` rejects an explicit `fast`. The `gdn`
+`fast` variants of `conv1d`, `gated_rmsnorm` and `rmsnorm` reduce in a
+run-dependent order, so they are not bit-reproducible and `--deterministic-mode` rejects an explicit `fast`. The `gdn`
 `fast` runs in a fixed order: it repeats bit for bit run to run (its bits differ from `det`), so `--deterministic-mode`
 allows it. `kda` ships `det` only. A call that `fast` does not serve runs `det` and logs it once.
 
