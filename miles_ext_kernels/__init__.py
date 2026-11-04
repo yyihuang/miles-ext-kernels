@@ -7,6 +7,7 @@ dispatch seam. Each kernel package here owns its own arguments and validates the
 from argparse import ArgumentParser, Namespace
 
 from miles_ext_kernels.conv1d import arguments as conv1d_arguments
+from miles_ext_kernels.dsa import arguments as dsa_arguments
 from miles_ext_kernels.gated_rmsnorm import arguments as gated_rmsnorm_arguments
 from miles_ext_kernels.gdn import arguments as gdn_arguments
 from miles_ext_kernels.kda import arguments as kda_arguments
@@ -16,6 +17,7 @@ from miles_ext_kernels.rmsnorm import arguments as rmsnorm_arguments
 _KERNEL_PACKAGES = (
     gdn_arguments,
     kda_arguments,
+    dsa_arguments,
     conv1d_arguments,
     gated_rmsnorm_arguments,
     rmsnorm_arguments,
