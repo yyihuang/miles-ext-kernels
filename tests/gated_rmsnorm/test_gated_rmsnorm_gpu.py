@@ -113,7 +113,7 @@ def test_det_and_fast_match_fp64(T, H):
             assert torch.equal(a, b), f"det {name} differs between runs"
     for _ in range(REPEATS):
         fast = run("fast", x, z, w, dy)
-        for name, a, b in zip(("y", "dx", "dz"), det, fast, strict=True):
+        for name, a, b in zip(("y", "dx", "dz"), det[:3], fast[:3], strict=True):
             assert torch.equal(a, b), f"fast {name} differs from det"
         assert_dw_within(fast[3], dw64, mag, what="fast dw")
 
