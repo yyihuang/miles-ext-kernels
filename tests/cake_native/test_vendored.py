@@ -37,6 +37,7 @@ VENDORED_FAMILIES: frozenset[str] = frozenset(
         "gqa",
         "kda",
         "mhc",
+        "moe_grouped_gemm",
         "rmsnorm",
     }
 )
