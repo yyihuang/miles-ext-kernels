@@ -39,6 +39,7 @@ import platform
 import re
 import shutil
 import subprocess
+import uuid
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -200,7 +201,8 @@ class JitSpec:
             fcntl.flock(lock, fcntl.LOCK_EX)  # released when the file closes
             if path.is_file():  # another rank built it while this one waited
                 return path
-            temporary = path.with_name(f"{path.stem}.{os.getpid()}.tmp.so")
+            # unique across hosts: a lock that is local to each node still lets two nodes build at once
+            temporary = path.with_name(f"{path.stem}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp.so")
             command = self.command(temporary)
             try:
                 try:
