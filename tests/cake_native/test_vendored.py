@@ -27,7 +27,21 @@ GIT = ["git", "-c", "user.name=synthetic", "-c", "user.email=synthetic@example.c
 
 # Every family with a committed _vendor/ tree. The commit that vendors a family's Cake packages adds it here, so a
 # tree that was never committed fails in CI rather than leaving nothing to check.
-VENDORED_FAMILIES: frozenset[str] = frozenset()
+VENDORED_FAMILIES: frozenset[str] = frozenset(
+    {
+        "conv1d",
+        "dense_gemm",
+        "dsa",
+        "gated_rmsnorm",
+        "gdn",
+        "gqa",
+        "kda",
+        "lm_head",
+        "mhc",
+        "moe_grouped_gemm",
+        "rmsnorm",
+    }
+)
 
 
 def test_the_vendored_families_are_the_expected_ones():
