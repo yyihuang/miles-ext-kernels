@@ -12,8 +12,9 @@ rounding points and fixed-order reductions without atomics, so repeated passes o
 are bit-identical.  :func:`chunk_gated_delta_rule` has FLA's signature and autograd contract,
 including ``cu_seqlens`` packing and ``cp_context`` state passing.
 
-miles selects it with ``--linear-attention-backend cake`` under ``--use-miles-ext-kernels``.  Importing this
-package does not import torch: the entry points load on first access.
+miles selects it with ``--linear-attention-backend cake`` under ``--use-miles-ext-kernels`` and hands the
+arguments of :mod:`.arguments` to :func:`configure`.  Importing this package does not import torch: the entry
+points load on first access.
 """
 
 from importlib import import_module
@@ -22,10 +23,11 @@ from importlib import import_module
 _LAZY = {
     "SUPPORTED_CAPABILITIES": "._jit",
     "chunk_gated_delta_rule": ".ops",
+    "configure": ".arguments",
     "device_arch": "._jit",
 }
 
-__all__ = ["SUPPORTED_CAPABILITIES", "chunk_gated_delta_rule", "device_arch"]
+__all__ = ["SUPPORTED_CAPABILITIES", "chunk_gated_delta_rule", "configure", "device_arch"]
 
 
 def __getattr__(name: str):

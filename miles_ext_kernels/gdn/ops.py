@@ -22,7 +22,8 @@ distinct layout from the host copy of ``cu_seqlens`` that Megatron's ``packed_se
 (``cu_seqlens_cpu``; no device-to-host synchronisation, no launch) and shared by every layer and by the
 activation-recompute forward; a device-only ``cu_seqlens`` falls back to the on-device table kernel.  The forward
 keeps the WY / state tensors (``w``, ``u``, ``h``, ``v_new``) on the autograd tape by default
-(``MILES_GDN_CHUNK_TRAIN_SAVE_STATE=0`` recomputes them in the backward instead; both give bit-identical gradients).
+(:data:`SAVE_STATE` ``= False``, which ``miles_ext_kernels.gdn.configure`` sets under ``--cake-gdn-recompute-state``,
+recomputes them in the backward instead; both give bit-identical gradients).
 
 Context parallelism reuses FLA v0.5.2's ``fla.ops.cp`` pre-processing exactly
 (``chunk_gated_delta_rule_fwd_h_pre_process``, ``compress_h0``, ``expand_h0``,
@@ -33,7 +34,6 @@ unchanged.  Those helpers are only imported when a ``cp_context`` is supplied.
 from __future__ import annotations
 
 import math
-import os
 import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -62,13 +62,18 @@ HEAD_DIM = 128
 REG_SCAN_CONFIGS = ((32, 2), (32, 1), (64, 1))
 # Tests may pin a scan configuration; production always derives it from shape and device.
 FORCED_SCAN_CONFIG: tuple[int, int] | None = None
-# Keep w/u/h/v_new on the autograd tape (default) instead of recomputing them in the backward.
-SAVE_STATE = os.environ.get("MILES_GDN_CHUNK_TRAIN_SAVE_STATE", "1") == "1"
-# Host-side caches of round R6-7.  ``GDN_HOST_CACHE=0`` disables all of them at import time (the A/B arm): the pool of
-# pure-scratch device workspaces (:class:`Workspaces`), the per-call front cache of the chunk-table lookup
-# (:func:`_chunk_meta`) and the per-device architecture tag (:func:`_arch_of`).  The positional launchers and the
-# shape pass-through are not caches and stay on in both arms.
-HOST_CACHE = os.environ.get("GDN_HOST_CACHE", "1") == "1"
+# Keep w/u/h/v_new on the autograd tape (default) instead of recomputing them in the backward; read at call time.
+# ``miles_ext_kernels.gdn.configure`` clears it under ``--cake-gdn-recompute-state``.
+SAVE_STATE = True
+# Host-side caches of round R6-7: the pool of pure-scratch device workspaces (:class:`Workspaces`), the per-call front
+# cache of the chunk-table lookup (:func:`_chunk_meta`) and the per-device architecture tag (:func:`_arch_of`).  The
+# positional launchers and the shape pass-through are not caches and stay on in both arms.  The uncached A/B arm sets
+# ``HOST_CACHE = False`` (read at call time by :func:`_chunk_meta` and :func:`_arch_of`) together with
+# ``WORKSPACES = FreshWorkspaces()`` (the pool object is chosen at import time), e.g. with ``monkeypatch.setattr``.
+HOST_CACHE = True
+# Build every stage on the first call on a device (:func:`_jit.prebuild`) so no stage compiles inside a later step;
+# read at call time.
+PREBUILD = True
 
 
 # --------------------------------------------------------------------------- #
@@ -351,9 +356,7 @@ FINALIZE_MLP_GROUP = (
 FINALIZE_MLP_MIN_BLOCKS = (
     4  # its launch-bound residency: __launch_bounds__(128, 4) -> 128-register cap -> four CTAs per SM
 )
-FORCED_FINALIZE: str | None = (
-    None  # tests / experiments: "finalize" or "finalize_mlp" (also MILES_GDN_CHUNK_TRAIN_FINALIZE)
-)
+FORCED_FINALIZE: str | None = None  # tests / experiments: "finalize" or "finalize_mlp"
 FINALIZE_STAGES = ("finalize", "finalize_mlp")
 
 
@@ -366,17 +369,17 @@ def finalize_stage(num_chunks: int, num_heads: int, num_v_heads: int, sm_count: 
     warps per SM, so the one-wave kernel keeps the thread-level parallelism of the shared kernel and adds the
     memory-level parallelism of a whole row pair in flight.  Beyond it the shared 40-register kernel's higher residency
     hides latency across more warps while the one-wave kernel would run several waves, so the shared kernel stays
-    (the TP1 / TP2 / 16k-token rows).  ``MILES_GDN_CHUNK_TRAIN_FINALIZE`` (or :data:`FORCED_FINALIZE`) pins a stage for
-    experiments and tests; a pinned ``finalize_mlp`` outside its group contract raises instead of launching the kernel.
+    (the TP1 / TP2 / 16k-token rows).  :data:`FORCED_FINALIZE` pins a stage for experiments and tests; a pinned
+    ``finalize_mlp`` outside its group contract raises instead of launching the kernel.
     """
 
     if num_heads <= 0 or num_v_heads % num_heads != 0:
         raise ValueError(f"num_v_heads={num_v_heads} must be a positive multiple of num_heads={num_heads}")
-    forced = FORCED_FINALIZE if FORCED_FINALIZE is not None else os.environ.get("MILES_GDN_CHUNK_TRAIN_FINALIZE")
+    forced = FORCED_FINALIZE
     group_ok = num_v_heads == FINALIZE_MLP_GROUP * num_heads
     if forced:
         if forced not in FINALIZE_STAGES:
-            raise ValueError(f"MILES_GDN_CHUNK_TRAIN_FINALIZE={forced!r}; expected one of {FINALIZE_STAGES}")
+            raise ValueError(f"FORCED_FINALIZE={forced!r}; expected one of {FINALIZE_STAGES}")
         if forced == "finalize_mlp" and not group_ok:
             raise ValueError(
                 f"finalize_mlp is unrolled for a value-head group of {FINALIZE_MLP_GROUP}; "
@@ -395,16 +398,12 @@ def choose_register_scan_config(
 
     The preferred configuration (32 rows, K split in two -> four warps) has the shortest per-chunk
     chain and fills all four SM sub-partitions; wider blocks are used only when the preferred grid
-    would need more than one wave.  ``MILES_GDN_CHUNK_TRAIN_SCAN_CFG=vb,ksplit`` (or :data:`FORCED_SCAN_CONFIG`)
-    pins a configuration for experiments and tests.  The choice depends only on shape and device, never on data;
-    it is the baseline the segment planner (:func:`choose_scan_plan`) prices every alternative against.
+    would need more than one wave.  :data:`FORCED_SCAN_CONFIG` ``= (vb, ksplit)`` pins a configuration for
+    experiments and tests.  The choice depends only on shape and device, never on data; it is the baseline the
+    segment planner (:func:`choose_scan_plan`) prices every alternative against.
     """
     if FORCED_SCAN_CONFIG is not None:
         return int(FORCED_SCAN_CONFIG[0]), int(FORCED_SCAN_CONFIG[1])
-    forced = os.environ.get("MILES_GDN_CHUNK_TRAIN_SCAN_CFG")
-    if forced:
-        vb, ks = (int(x) for x in forced.split(","))
-        return vb, ks
     return _choose_register_scan_config(kind, num_seqs, num_v_heads, device_index, arch)
 
 
@@ -481,14 +480,14 @@ FORCED_SEGMENT_LEN: int | None = None  # tests pin the segment length (0 = seria
 # Warm-up threshold of the pre-scans in log2: the trailing (forward) / leading (backward) chunks of a segment whose
 # summed gate is below it bound the segment's map ``|M| <= 2^thresh`` and the dropped earlier contributions to ``B``
 # to the same relative size; -10 nats is FlashQLA's warm-up rule (cp_fwd.py at 0.1.2+7c7dfe1).
-# ``MILES_GDN_CHUNK_TRAIN_WARMUP_LOG2`` overrides it for experiments (``-inf``: the exact path on every segment).
+# :data:`FORCED_WARMUP_LOG2` overrides it for experiments (``-inf``: the exact path on every segment).
 WARMUP_THRESH_LOG2 = -10.0 / math.log(2.0)
+FORCED_WARMUP_LOG2: float | None = None  # experiments pin the warm-up threshold (log2); None keeps the default
 
 
 def warmup_thresh_log2() -> float:
-    """The pre-scan warm-up threshold (log2), :data:`WARMUP_THRESH_LOG2` unless ``MILES_GDN_CHUNK_TRAIN_WARMUP_LOG2`` is set."""
-    forced = os.environ.get("MILES_GDN_CHUNK_TRAIN_WARMUP_LOG2")
-    return float(forced) if forced else WARMUP_THRESH_LOG2
+    """The pre-scan warm-up threshold (log2), :data:`WARMUP_THRESH_LOG2` unless :data:`FORCED_WARMUP_LOG2` is set."""
+    return float(FORCED_WARMUP_LOG2) if FORCED_WARMUP_LOG2 is not None else WARMUP_THRESH_LOG2
 
 
 def _scan_residency(kind: str, vb: int, ks: int, device_index: int, arch: str) -> int:
@@ -686,13 +685,12 @@ def choose_scan_plan(
     per-sequence chunk counts are priced when ``seq_lens`` is known (host route), the padded chunk bound
     ``T // 64 + num_seqs`` otherwise (device route).  The cheapest plan is taken when it beats ``0.95 x`` the baseline
     (one rule for a configuration switch and for a split); otherwise the baseline runs.
-    ``MILES_GDN_CHUNK_TRAIN_SCAN_CFG`` / :data:`FORCED_SCAN_CONFIG` pin the configuration (the segment length is then
-    planned for it); ``MILES_GDN_CHUNK_TRAIN_SEG_CHUNKS`` / :data:`FORCED_SEGMENT_LEN` pin the segment length of the
-    baseline (or pinned) configuration, validated at plan time: a pin on a configuration without a pre-scan stage is
-    dropped with a :class:`RuntimeWarning` naming the layout, and the serial scan runs.
+    :data:`FORCED_SCAN_CONFIG` pins the configuration (the segment length is then planned for it);
+    :data:`FORCED_SEGMENT_LEN` pins the segment length of the baseline (or pinned) configuration, validated at plan
+    time: a pin on a configuration without a pre-scan stage is dropped with a :class:`RuntimeWarning` naming the
+    layout, and the serial scan runs.
     """
-    env = os.environ.get("MILES_GDN_CHUNK_TRAIN_SEG_CHUNKS")
-    forced_len = int(FORCED_SEGMENT_LEN) if FORCED_SEGMENT_LEN is not None else (int(env) if env else None)
+    forced_len = int(FORCED_SEGMENT_LEN) if FORCED_SEGMENT_LEN is not None else None
     baseline = choose_register_scan_config(kind, num_seqs, num_v_heads, device_index, arch)
     if forced_len is not None:
         unsplittable = _prescan_fits(kind, baseline, device_index, arch)
@@ -707,7 +705,7 @@ def choose_scan_plan(
         return ScanPlan(baseline, forced_len)
     if _scan_fits(kind, baseline, device_index, arch) is not None:
         return ScanPlan(baseline, 0)  # the launch reports the unsupported device (_scan_stage)
-    pinned = FORCED_SCAN_CONFIG is not None or bool(os.environ.get("MILES_GDN_CHUNK_TRAIN_SCAN_CFG"))
+    pinned = FORCED_SCAN_CONFIG is not None
     chunks_bound = total_tokens // CHUNK + num_seqs
     chunks = (
         tuple(-(-int(x) // CHUNK) for x in seq_lens)
@@ -747,9 +745,7 @@ def _plan_pins() -> tuple:
     """The test / experiment pins a plan depends on besides its arguments (part of the :func:`scan_plans` memo key)."""
     return (
         None if FORCED_SEGMENT_LEN is None else int(FORCED_SEGMENT_LEN),
-        os.environ.get("MILES_GDN_CHUNK_TRAIN_SEG_CHUNKS"),
         None if FORCED_SCAN_CONFIG is None else (int(FORCED_SCAN_CONFIG[0]), int(FORCED_SCAN_CONFIG[1])),
-        os.environ.get("MILES_GDN_CHUNK_TRAIN_SCAN_CFG"),
     )
 
 
@@ -874,7 +870,8 @@ class Workspaces:
 
 
 class FreshWorkspaces(Workspaces):
-    """The ``GDN_HOST_CACHE=0`` arm: every scratch buffer is a fresh ``torch.empty`` (the pre-R6-7 behaviour)."""
+    """The uncached arm (see :data:`HOST_CACHE`): every scratch buffer is a fresh ``torch.empty`` (the pre-R6-7
+    behaviour)."""
 
     __slots__ = ()
 
@@ -1817,7 +1814,7 @@ class ChunkGatedDeltaRuleFunction(torch.autograd.Function):
         num_v_heads, value_dim = v.shape[2], v.shape[3]
         index = q.device.index if q.device.index is not None else torch.cuda.current_device()
         arch = _arch_of(index)
-        if os.environ.get("MILES_GDN_CHUNK_TRAIN_PREBUILD", "1") == "1":
+        if PREBUILD:
             prebuild(arch)  # cached: builds all stages once so no stage compiles inside a later step
         tokens = batch * seq_len
         # ``[B, T, H, D]`` passes through unflattened: the kernels address tokens through the chunk table and never see a

@@ -36,6 +36,8 @@ _CONVERSION_FLAGS = (
     "-U__CUDA_NO_HALF2_OPERATORS__",
     "-U__CUDA_NO_BFLOAT16_CONVERSIONS__",
 )
+# Print the nvcc / ninja command lines of every stage build (debugging); read at build time.
+VERBOSE_BUILD = False
 
 
 def _load_registry() -> dict:
@@ -78,7 +80,7 @@ def load(stage, arch):
         extra_include_paths=[str(_CSRC)],
         extra_cuda_cflags=[_ARCH_FLAGS[arch], "-O3", *_CONVERSION_FLAGS, *record["compile_flags"]],
         extra_ldflags=["-lcuda"],
-        verbose=os.environ.get("MILES_GDN_CHUNK_TRAIN_VERBOSE_BUILD", "0") == "1",
+        verbose=VERBOSE_BUILD,
     )
 
 
@@ -89,7 +91,7 @@ def prebuild(arch, max_workers=None):
     The stages build lazily on first use otherwise; with the register-scan variants selected by shape,
     a new (num_seqs, heads) combination seen mid-training would compile a stage inside a training step
     (about a minute per stage, serially).  Called once from ``chunk_gated_delta_rule`` on its first call
-    on a device; ``MILES_GDN_CHUNK_TRAIN_PREBUILD=0`` disables it.
+    on a device; ``ops.PREBUILD = False`` disables it.
     """
     import time
     from concurrent.futures import ThreadPoolExecutor
