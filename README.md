@@ -19,10 +19,11 @@ Under `--use-miles-ext-kernels`, miles calls `miles_ext_kernels.add_arguments(pa
 
 | package | miles backend switch | arguments | GPUs | tests |
 |---|---|---|---|---|
-| `gdn` (deterministic chunked gated delta rule, forward + backward) | `--linear-attention-backend cake` | `--cake-gdn-recompute-state` | SM100a / SM103a | `tests/gdn` (CPU; `test_gdn_wiring.py` needs CUDA) |
+| `gdn` (deterministic chunked gated delta rule, forward + backward) | `--linear-attention-backend cake` | `--cake-gdn-recompute-state` | SM100a / SM103a | `tests/gdn` (CPU; `test_gdn_wiring.py` and `test_fla_parity.py` need CUDA) |
 
 A package applies its parsed arguments in `configure(args)`; miles calls it where it builds a layer on the `cake`
-backend (`miles_ext_kernels.gdn.configure`).
+backend (`miles_ext_kernels.gdn.configure`). miles keeps the values of the arguments registered here in one typed
+field of its configuration and passes `configure` a namespace holding just those values.
 
 ## Adding a kernel
 
