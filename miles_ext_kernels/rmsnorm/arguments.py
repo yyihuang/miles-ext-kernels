@@ -19,7 +19,7 @@ VARIANT_FLAG = "--cake-rmsnorm-variant"
 
 
 def add_arguments(group) -> None:
-    _variant.add_variant_argument(group, VARIANT_FLAG, BACKEND)
+    _variant.add_variant_argument(group, VARIANT_FLAG, BACKEND, fast_unordered=True)
 
 
 def validate_args(args: Namespace) -> None:

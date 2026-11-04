@@ -21,7 +21,7 @@ BACKEND = "--moe-grouped-gemm-backend cake"
 
 
 def add_arguments(group) -> None:
-    _variant.add_variant_argument(group, FLAG, BACKEND)
+    _variant.add_variant_argument(group, FLAG, BACKEND, fast_unordered=True)
 
 
 def validate_args(args: Namespace) -> None:

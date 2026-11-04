@@ -35,7 +35,7 @@ _UNEMBED_TARGETS = frozenset({"unembed", "lm_head", "head", "output_layer"})
 
 
 def add_arguments(group) -> None:
-    _variant.add_variant_argument(group, VARIANT_FLAG, BACKEND)
+    _variant.add_variant_argument(group, VARIANT_FLAG, BACKEND, fast_unordered=True)
     group.add_argument(
         CHUNK_SIZE_FLAG,
         type=int,

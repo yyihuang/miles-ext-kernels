@@ -23,7 +23,7 @@ _EXT_FLAGS = ("--cake-dsa-bwd-workspace-bytes", "--cake-dsa-lazy-build")
 
 
 def add_arguments(group) -> None:
-    _variant.add_variant_argument(group, VARIANT_FLAG, BACKEND)
+    _variant.add_variant_argument(group, VARIANT_FLAG, BACKEND, fast_unordered=True)
     group.add_argument(
         "--cake-dsa-bwd-workspace-bytes",
         type=int,

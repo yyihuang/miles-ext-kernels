@@ -22,7 +22,7 @@ BACKEND = "--linear-attention-backend cake"
 
 
 def add_arguments(group) -> None:
-    _variant.add_variant_argument(group, VARIANT_FLAG, BACKEND)
+    _variant.add_variant_argument(group, VARIANT_FLAG, BACKEND, fast_unordered=False)
     group.add_argument(
         "--cake-gdn-recompute-state",
         action="store_true",

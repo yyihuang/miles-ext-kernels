@@ -13,7 +13,7 @@ FLAG = "--cake-synth-variant"
 
 def _parse(argv: list[str], **attributes) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    _variant.add_variant_argument(parser, FLAG, "--synth-backend cake")
+    _variant.add_variant_argument(parser, FLAG, "--synth-backend cake", fast_unordered=True)
     args = parser.parse_args(argv)
     for name, value in attributes.items():
         setattr(args, name, value)
@@ -25,6 +25,18 @@ def test_the_flag_takes_det_or_fast_and_defaults_to_unset():
     assert _parse([FLAG, "det"]).cake_synth_variant == "det"
     with pytest.raises(SystemExit):
         _parse([FLAG, "fastest"])
+
+
+@pytest.mark.parametrize(
+    ("fast_unordered", "says", "does_not_say"),
+    [(True, "run-dependent order", "fixed order"), (False, "fixed order", "run-dependent order")],
+)
+def test_the_help_says_whether_fast_repeats_bit_for_bit(fast_unordered, says, does_not_say):
+    parser = argparse.ArgumentParser()
+    _variant.add_variant_argument(parser, FLAG, "--synth-backend cake", fast_unordered=fast_unordered)
+    (action,) = [action for action in parser._actions if FLAG in action.option_strings]
+
+    assert says in action.help and does_not_say not in action.help
 
 
 @pytest.mark.parametrize(

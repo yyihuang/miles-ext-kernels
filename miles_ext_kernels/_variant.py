@@ -5,10 +5,12 @@ https://www.apache.org/licenses/LICENSE-2.0
 
 The ``--cake-<kernel>-variant {det,fast}`` choice of the kernel packages that ship two variants (torch-free).
 
-``det`` is the bit-deterministic Cake kernel, ``fast`` its non-deterministic sibling. Unset, a package runs ``fast``,
-or ``det`` when miles runs in deterministic mode. A package resolves its flag in ``validate_args`` with
-:func:`resolve`, which writes the result back, so ``configure`` always sees ``det`` or ``fast``. A call that ``fast``
-does not serve runs ``det`` and says so once with :func:`warn_det_fallback`.
+``det`` is the bit-deterministic Cake kernel, ``fast`` its faster sibling. Most ``fast`` variants reduce in a
+run-dependent order (``fast_unordered``), so they are not bit-reproducible and deterministic mode refuses an explicit
+``fast``; a fixed-order ``fast`` (gdn) repeats bit for bit, though its bits differ from ``det``, and deterministic mode
+allows it. Unset, a package runs ``fast``, or ``det`` when miles runs in deterministic mode. A package resolves its
+flag in ``validate_args`` with :func:`resolve`, which writes the result back, so ``configure`` always sees ``det`` or
+``fast``. A call that ``fast`` does not serve runs ``det`` and says so once with :func:`warn_det_fallback`.
 """
 
 from __future__ import annotations
@@ -24,16 +26,26 @@ logger = logging.getLogger("miles_ext_kernels")
 _warned: set[tuple[str, str]] = set()
 
 
-def add_variant_argument(group, flag: str, backend: str) -> None:
-    """Register ``flag`` (``--cake-<kernel>-variant``) for the kernels selected by ``backend``."""
+def add_variant_argument(group, flag: str, backend: str, *, fast_unordered: bool) -> None:
+    """Register ``flag`` (``--cake-<kernel>-variant``) for the kernels selected by ``backend``.
+
+    ``fast_unordered`` is the value the package passes to :func:`resolve`; the help says what ``fast`` guarantees.
+    """
+    if fast_unordered:
+        fast = (
+            "'fast' reduces in a run-dependent order, so it is not bit-reproducible run to run. "
+            "Default: 'fast', or 'det' under --deterministic-mode, which rejects an explicit 'fast'."
+        )
+    else:
+        fast = (
+            "'fast' runs in a fixed order, so it repeats bit for bit run to run (its bits differ from 'det'). "
+            "Default: 'fast', or 'det' under --deterministic-mode, which also allows an explicit 'fast'."
+        )
     group.add_argument(
         flag,
         choices=VARIANTS,
         default=None,
-        help=(
-            f"Kernel variant under {backend}: 'det' is bit-deterministic, 'fast' is the non-deterministic sibling. "
-            "Default: 'fast', or 'det' under --deterministic-mode."
-        ),
+        help=f"Kernel variant under {backend}: 'det' is bit-deterministic; {fast}",
     )
 
 

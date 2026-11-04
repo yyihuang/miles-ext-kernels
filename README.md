@@ -19,11 +19,25 @@ Under `--use-miles-ext-kernels`, miles calls `miles_ext_kernels.add_arguments(pa
 
 | package | miles backend switch | arguments | GPUs | tests |
 |---|---|---|---|---|
-| `gdn` (deterministic chunked gated delta rule, forward + backward) | `--linear-attention-backend cake` | `--cake-gdn-recompute-state` | SM100a / SM103a | `tests/gdn` (CPU; `test_gdn_wiring.py` and `test_fla_parity.py` need CUDA) |
+| `gdn` (chunked gated delta rule, forward + backward: `det` is the bit-deterministic render, the only variant with context parallelism; `fast` is the vendored Cake non-deterministic package `cake_gdn_train`, fixed-order, so it repeats bit for bit and `--deterministic-mode` allows an explicit `fast`; a `cp_context` call runs `det`) | `--linear-attention-backend cake` | `--cake-gdn-variant {det,fast}`, `--cake-gdn-recompute-state` | SM100a / SM103a | `tests/gdn` (CPU; `test_gdn_wiring.py`, `test_fla_parity.py` and `test_gdn_fast_gpu.py` need CUDA) |
+| `kda` (deterministic packed KDA chunked forward + backward: raw forget gate and q/k L2 norm in the kernels, 1-64 heads) | `--kda-backend cake` | none | SM100a / SM103a | `tests/kda` (CPU; `test_kda_gpu.py` needs CUDA, its fla parity rows need fla) |
+| `dsa` (DSA sparse-MLA attention forward + backward, lightning-indexer scores; variants det and fast) | `--miles-dsa-kernel-backend cake` | `--cake-dsa-variant {det,fast}`, `--cake-dsa-bwd-workspace-bytes`, `--cake-dsa-lazy-build` | SM100a / SM103a | `tests/dsa` (CPU: `test_arguments.py`, `test_registry.py`; `test_dispatch.py` needs torch; `test_dsa_gpu.py` needs SM100a/SM103a) |
+| `mhc` (Cake four-stream mHC hyper connection: prepare, finish, stream-mean head; det and fast) | `--mhc-backend cake` | `--cake-mhc-variant {det,fast}` | SM100a / SM103a | `tests/mhc` (CPU: `test_arguments.py`, `test_vendored_routes.py`; `test_mhc_gpu.py` needs SM100a / SM103a) |
+| `gqa` (packed causal GQA attention, head dim 256, forward + backward; dQ is summed with FP32 atomics, so it is not bit-reproducible) | `--full-attention-backend cake` | none (the cake backend is rejected under `--deterministic-mode`) | SM100a / SM103a | `tests/gqa` (CPU; `test_gqa_gpu.py` needs CUDA) |
+| `conv1d` (packed causal depthwise conv1d + SiLU, kernel size 4: the GDN / KDA short convs; det + fast) | `--linear-attention-conv-backend cake` | `--cake-conv1d-variant {det,fast}`, `--cake-conv1d-silu-grad-preactivation {bf16,fp32}` | SM100a / SM103a | `tests/conv1d` (CPU; `test_conv1d_gpu.py` needs CUDA) |
+| `gated_rmsnorm` (RMSNorm(x) * w * SiLU(z) over rows of 128: the GDN output norm; det + fast) | `--linear-attention-output-norm-backend cake` | `--cake-gated-rmsnorm-variant {det,fast}` | SM100a / SM103a | `tests/gated_rmsnorm` (CPU; `test_gated_rmsnorm_gpu.py` needs CUDA) |
+| `rmsnorm` (zero-centred RMSNorm x * rstd * (1 + w): the GDN input layernorm, hidden 256/512/1536/2048/4096/5120/6144; det + fast) | `--linear-attention-input-norm cake` | `--cake-rmsnorm-variant {det,fast}` | SM100a / SM103a | `tests/rmsnorm` (CPU; `test_rmsnorm_gpu.py` needs CUDA) |
+| `lm_head` (chunked LM-head selected-token log-probabilities with temperature, forward + backward; `det` bit-reproducible, `fast` sums the dX K slices in an unordered FP32 reduction and skips zero-gradient rows) | `--log-probs-backend cake` (tensor parallel size 1; the miles choice lands with miles' LM-head output hook) | `--cake-lm-head-variant {det,fast}`, `--cake-lm-head-chunk-size` (default 4096) | SM100a / SM103a | `tests/lm_head` (CPU; `test_lm_head_gpu.py` needs CUDA) |
+| `dense_gemm` (deterministic batched per-head projection GEMM and FP32 router gate GEMM, forward + backward) | `--batched-projection-gemm-backend cake`, `--moe-router-gemm-backend cake` (Megatron) | none | SM100a / SM103a | `tests/dense_gemm` (CPU; `test_batched_projection_gpu.py` and `test_router_gpu.py` need CUDA) |
+| `moe_grouped_gemm` (ragged BF16 MoE grouped GEMM, `det` and `fast`, forward + backward) | `--moe-grouped-gemm-backend cake` (torchtitan) | `--cake-moe-grouped-gemm-variant {det,fast}` | SM100a / SM103a | `tests/moe_grouped_gemm` (CPU; `test_moe_grouped_gemm_gpu.py` needs CUDA) |
 
-More kernel packages are added to this table as they land. A package that ships a bit-deterministic and a
-non-deterministic variant takes `--cake-<kernel>-variant {det,fast}`: unset, it runs `fast`, or `det` under miles'
-`--deterministic-mode` (`miles_ext_kernels/_variant.py`).
+A package that ships two variants takes `--cake-<kernel>-variant {det,fast}`: `det` is bit-deterministic, `fast` is
+faster. Unset, it runs `fast`, or `det` under miles' `--deterministic-mode` (`miles_ext_kernels/_variant.py`). The
+`fast` variants of `dsa`, `mhc`, `conv1d`, `gated_rmsnorm`, `rmsnorm`, `lm_head` and `moe_grouped_gemm` reduce in a
+run-dependent order, so they are not bit-reproducible and `--deterministic-mode` rejects an explicit `fast`. The `gdn`
+`fast` runs in a fixed order: it repeats bit for bit run to run (its bits differ from `det`), so `--deterministic-mode`
+allows it. `kda` and `dense_gemm` ship `det` only; `gqa` ships one variant, not bit-reproducible, which
+`--deterministic-mode` rejects. A call that `fast` does not serve runs `det` and logs it once.
 
 A package applies its parsed arguments in `configure(args)`; miles calls it where it builds a layer on the `cake`
 backend (`miles_ext_kernels.gdn.configure`). miles keeps the values of the arguments registered here in one typed

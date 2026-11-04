@@ -23,7 +23,7 @@ DEFAULT_SILU_GRAD_PREACTIVATION = "bf16"
 
 
 def add_arguments(group) -> None:
-    _variant.add_variant_argument(group, VARIANT_FLAG, BACKEND)
+    _variant.add_variant_argument(group, VARIANT_FLAG, BACKEND, fast_unordered=True)
     group.add_argument(
         SILU_GRAD_FLAG,
         choices=SILU_GRAD_PREACTIVATIONS,

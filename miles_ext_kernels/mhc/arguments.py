@@ -23,7 +23,7 @@ HIDDEN_SIZES = (4096, 5120, 7168)
 
 
 def add_arguments(group) -> None:
-    _variant.add_variant_argument(group, FLAG, BACKEND)
+    _variant.add_variant_argument(group, FLAG, BACKEND, fast_unordered=True)
 
 
 def validate_args(args: Namespace) -> None:
