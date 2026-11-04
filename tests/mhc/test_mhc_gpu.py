@@ -1,8 +1,9 @@
 """The Cake mHC kernels (``miles_ext_kernels.mhc``) on Blackwell (SM100a / SM103a).
 
 Ported from FlashInfer's backend suites of the three vendored packages (``tests/mhc/test_cake_mhc_det_train.py``,
-``tests/experimental/test_cake_mhc_train.py``, ``tests/mhc/test_cake_mhc_det_train_head.py``) at the hidden sizes of
-the miles models (4096, 7168) and token counts 1, 257, 2049 and 16263, through the autograd entry points miles calls:
+``tests/experimental/test_cake_mhc_train.py``, ``tests/mhc/test_cake_mhc_det_train_head.py``) at every hidden size
+the package accepts (4096, 5120, 7168) and token counts 1, 257, 2049 and 16263, through the autograd entry points
+miles calls:
 
 * ``det``: every output against a pure-torch FP64 reference of the function (autograd through the FP64 forward)
   under FlashInfer's bars -- BF16 ``U``, ``Y``, ``dB``, ``dX``: ``|out - ref| <= 1e-2 + 1e-2 |ref|`` on every element;
@@ -11,8 +12,9 @@ the miles models (4096, 7168) and token counts 1, 257, 2049 and 16263, through t
 * ``fast``: ``U``, ``Y``, ``dB`` and ``dX`` bitwise the ``det`` outputs, ``dscale`` / ``dbase`` too outside the
   ``det`` group-row band (hidden 4096 above 14927 tokens, where ``det`` sums them in another fixed order: there under
   the FP32 bars), ``dfn`` under the FP32 bars and within FlashInfer's summation-order bound of the ``det`` ``dfn``
-  (``F u 1.02 sum_t |dz'_t| |u_t|``, ``u = 2^-24``, ``F = 2 * 32 + 10``: its largest factor, at most 32 chunks), and a
-  second run with identical ``U`` / ``Y`` / ``dB`` / ``dX`` / ``dscale`` / ``dbase``;
+  (``F u 1.02 sum_t |dz'_t| |u_t|``, ``u = 2^-24``, ``F`` FlashInfer's factor of the token count: ``2 P`` for the
+  ``P`` chunk partials both sides sum, ``2 max(P_lpt, P) + 10`` where the column slab runs its two-size ``lpt``
+  partition), and a second run with identical ``U`` / ``Y`` / ``dB`` / ``dX`` / ``dscale`` / ``dbase``;
 * the variant of a call: :data:`ops.VARIANT` set by ``configure``, the handle naming its package, and ``fast`` under
   torch's deterministic algorithms running ``det`` (bitwise) with one logged warning;
 * the head: bit for bit torch's BF16 ``X.mean(dim=1)`` and its gradient, at hidden 4096, 5120 and 7168;
@@ -47,9 +49,8 @@ BF16_ATOL = BF16_RTOL = 1e-2
 FP32_REL_L2_MAX = 1e-5
 FP32_ELEM_REL_MAX = 1e-4
 FP32_UNIT = 2.0**-24
-DFN_ORDER_FACTOR = 2 * 32 + 10
-MODEL_HIDDEN_SIZES = (4096, 7168)
-CASES = [(hidden, T) for hidden in MODEL_HIDDEN_SIZES for T in (1, 257, 2049, 16263)]
+DFN_ABS_SLACK = 1.02
+CASES = [(hidden, T) for hidden in arguments.HIDDEN_SIZES for T in (1, 257, 2049, 16263)]
 BF16_OUTPUTS = ("U", "Y", "dB", "dX")
 PARAMETER_GRADS = ("dfn", "dscale", "dbase")
 
@@ -57,7 +58,7 @@ PARAMETER_GRADS = ("dfn", "dscale", "dbase")
 @pytest.fixture(autouse=True, scope="module")
 def prebuilt():
     """Compile the libraries of both variants and the head first: no test pays for a build mid-call."""
-    for hidden in MODEL_HIDDEN_SIZES:
+    for hidden in arguments.HIDDEN_SIZES:
         for variant in ("det", "fast"):
             ops.prebuild(DEVICE, hidden, variant=variant, head=True)
     yield
@@ -192,6 +193,22 @@ def _det_group_rows(T: int, hidden: int) -> bool:
     return jit.bwd_group_rows(T, jit.sm_count(DEVICE.index), jit.arch_for_capability(CAPABILITY), hidden)
 
 
+def _dfn_factor(T: int, hidden: int) -> float:
+    """``F`` of the ``dfn`` summation-order bound at ``T`` (FlashInfer's ``_dfn_factor``): ``2 P`` where the column
+    slab sums the partials of the ``P`` chunks ``det`` sums (at most ``P`` FP32 roundings on each side), ``2 max(P_lpt,
+    P) + 10`` where it runs the two-size ``lpt`` partition (the partials are another partition's)."""
+    fast, det = ops._fast().cake_jit, ops._det().cake_jit
+    sm_count, arch = fast.sm_count(DEVICE.index), fast.arch_for_capability(CAPABILITY)
+    parts = fast.host_plan(T, sm_count, arch, hidden)["parts"]
+    assert parts == det.host_plan(T, sm_count, arch, hidden)["parts"], (T, hidden)
+    assert 1 <= parts <= 32, (T, hidden, parts)
+    if not fast.bwd_slab_atomic_program(T, sm_count, arch, hidden).startswith("lpt"):
+        return 2.0 * parts
+    lpt_parts = fast.slab_plan(T, sm_count, arch, hidden)["lpt_parts"]
+    assert 1 <= lpt_parts <= 32, (T, hidden, lpt_parts)
+    return 2.0 * max(lpt_parts, parts) + 10.0
+
+
 @pytest.mark.parametrize(("hidden", "T"), CASES, ids=[f"H{hidden}-T{T}" for hidden, T in CASES])
 def test_det_and_fast_match_the_fp64_reference_and_each_other(hidden: int, T: int) -> None:
     i = _make_inputs(T, hidden)
@@ -219,7 +236,7 @@ def test_det_and_fast_match_the_fp64_reference_and_each_other(hidden: int, T: in
             else:
                 _assert_bitwise(run[k], det[0][k], f"fast run {n} {k} vs det {label}")
         _assert_fp32(run["dfn"], ref["dfn"], f"fast run {n} dfn {label}", per_element=False)
-        bound = DFN_ORDER_FACTOR * FP32_UNIT * 1.02 * ref["dfn_abs"]
+        bound = _dfn_factor(T, hidden) * FP32_UNIT * DFN_ABS_SLACK * ref["dfn_abs"]
         excess = (run["dfn"].to(F64) - det[0]["dfn"].to(F64)).abs() - bound
         assert float(excess.max()) <= 0, f"fast run {n} dfn {label}: beyond the summation-order bound of det's dfn"
     for k in (*BF16_OUTPUTS, "dscale", "dbase"):
