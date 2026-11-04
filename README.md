@@ -27,12 +27,13 @@ Under `--use-miles-ext-kernels`, miles calls `miles_ext_kernels.add_arguments(pa
 | `conv1d` (packed causal depthwise conv1d + SiLU, kernel size 4: the GDN / KDA short convs; det + fast) | `--linear-attention-conv-backend cake` | `--cake-conv1d-variant {det,fast}`, `--cake-conv1d-silu-grad-preactivation {bf16,fp32}` | SM100a / SM103a | `tests/conv1d` (CPU; `test_conv1d_gpu.py` needs CUDA) |
 | `gated_rmsnorm` (RMSNorm(x) * w * SiLU(z) over rows of 128: the GDN output norm; det + fast) | `--linear-attention-output-norm-backend cake` | `--cake-gated-rmsnorm-variant {det,fast}` | SM100a / SM103a | `tests/gated_rmsnorm` (CPU; `test_gated_rmsnorm_gpu.py` needs CUDA) |
 | `rmsnorm` (zero-centred RMSNorm x * rstd * (1 + w): the GDN input layernorm, hidden 256/512/1536/2048/4096/5120/6144; det + fast) | `--linear-attention-input-norm cake` | `--cake-rmsnorm-variant {det,fast}` | SM100a / SM103a | `tests/rmsnorm` (CPU; `test_rmsnorm_gpu.py` needs CUDA) |
+| `lm_head` (chunked LM-head selected-token log-probabilities with temperature, forward + backward; `det` bit-reproducible, `fast` sums the dX K slices in an unordered FP32 reduction and skips zero-gradient rows) | `--log-probs-backend cake` (tensor parallel size 1; the miles choice lands with miles' LM-head output hook) | `--cake-lm-head-variant {det,fast}`, `--cake-lm-head-chunk-size` (default 4096) | SM100a / SM103a | `tests/lm_head` (CPU; `test_lm_head_gpu.py` needs CUDA) |
 | `dense_gemm` (deterministic batched per-head projection GEMM and FP32 router gate GEMM, forward + backward) | `--batched-projection-gemm-backend cake`, `--moe-router-gemm-backend cake` (Megatron) | none | SM100a / SM103a | `tests/dense_gemm` (CPU; `test_batched_projection_gpu.py` and `test_router_gpu.py` need CUDA) |
 | `moe_grouped_gemm` (ragged BF16 MoE grouped GEMM, `det` and `fast`, forward + backward) | `--moe-grouped-gemm-backend cake` (torchtitan) | `--cake-moe-grouped-gemm-variant {det,fast}` | SM100a / SM103a | `tests/moe_grouped_gemm` (CPU; `test_moe_grouped_gemm_gpu.py` needs CUDA) |
 
 A package that ships two variants takes `--cake-<kernel>-variant {det,fast}`: `det` is bit-deterministic, `fast` is
 faster. Unset, it runs `fast`, or `det` under miles' `--deterministic-mode` (`miles_ext_kernels/_variant.py`). The
-`fast` variants of `dsa`, `mhc`, `conv1d`, `gated_rmsnorm`, `rmsnorm` and `moe_grouped_gemm` reduce in a
+`fast` variants of `dsa`, `mhc`, `conv1d`, `gated_rmsnorm`, `rmsnorm`, `lm_head` and `moe_grouped_gemm` reduce in a
 run-dependent order, so they are not bit-reproducible and `--deterministic-mode` rejects an explicit `fast`. The `gdn`
 `fast` runs in a fixed order: it repeats bit for bit run to run (its bits differ from `det`), so `--deterministic-mode`
 allows it. `kda` and `dense_gemm` ship `det` only; `gqa` ships one variant, not bit-reproducible, which

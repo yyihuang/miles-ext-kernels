@@ -13,6 +13,7 @@ from miles_ext_kernels.gated_rmsnorm import arguments as gated_rmsnorm_arguments
 from miles_ext_kernels.gdn import arguments as gdn_arguments
 from miles_ext_kernels.gqa import arguments as gqa_arguments
 from miles_ext_kernels.kda import arguments as kda_arguments
+from miles_ext_kernels.lm_head import arguments as lm_head_arguments
 from miles_ext_kernels.mhc import arguments as mhc_arguments
 from miles_ext_kernels.moe_grouped_gemm import arguments as moe_grouped_gemm_arguments
 from miles_ext_kernels.rmsnorm import arguments as rmsnorm_arguments
@@ -27,6 +28,7 @@ _KERNEL_PACKAGES = (
     conv1d_arguments,
     gated_rmsnorm_arguments,
     rmsnorm_arguments,
+    lm_head_arguments,
     dense_gemm_arguments,
     moe_grouped_gemm_arguments,
 )
