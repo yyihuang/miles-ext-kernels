@@ -29,6 +29,7 @@ GIT = ["git", "-c", "user.name=synthetic", "-c", "user.email=synthetic@example.c
 # tree that was never committed fails in CI rather than leaving nothing to check.
 VENDORED_FAMILIES: frozenset[str] = frozenset(
     {
+        "conv1d",
         "gdn",
         "kda",
     }
