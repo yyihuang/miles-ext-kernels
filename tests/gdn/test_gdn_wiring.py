@@ -1,10 +1,11 @@
 """Host wiring of the deterministic chunked GDN kernels (``miles_ext_kernels.gdn``).
 
 One exact chunk table per micro-batch layout (shared by every layer, no device-to-host synchronisation), launch
-counts, and the bit-identical tape / recompute backward.  Needs a CUDA device; the kernel tests need Blackwell
-(SM100a / SM103a) and skip elsewhere.
+counts, and the bit-identical tape / recompute backward that ``configure`` switches.  Needs a CUDA device; the kernel
+tests need Blackwell (SM100a / SM103a) and skip elsewhere.
 """
 
+import argparse
 import itertools
 import math
 import warnings
@@ -167,6 +168,25 @@ def test_tape_and_recompute_backward_are_bit_identical(monkeypatch):
         results[save_state] = _step(inputs, cu_seqlens=cu, cu_seqlens_cpu=_cu(LAYOUT))
     for name in results[True]:
         assert torch.equal(results[True][name], results[False][name]), f"{name}: tape vs recompute differ"
+
+
+def test_configure_switches_the_kernels_between_tape_and_recompute(monkeypatch):
+    # --cake-gdn-recompute-state reaches the real kernels through the configure miles calls: under it w / u / h / v_new
+    # leave the autograd tape, without it they stay on
+    _require_blackwell()
+    from miles_ext_kernels.gdn import configure
+
+    monkeypatch.setattr(ops, "SAVE_STATE", ops.SAVE_STATE)  # restored after the test
+    leaves = _leaves(_inputs(LAYOUT, seed=3))
+    cu = torch.tensor(_cu(LAYOUT), device="cuda", dtype=torch.int32)
+    saved = {}
+    for recompute in (True, False):
+        configure(argparse.Namespace(cake_gdn_recompute_state=recompute))
+        assert ops.SAVE_STATE is (not recompute)
+        out, _ = ops.chunk_gated_delta_rule(*leaves, use_qk_l2norm_in_kernel=True, cu_seqlens=cu)
+        assert out.grad_fn.saved_state_tensors is (not recompute)
+        saved[recompute] = len(out.grad_fn.saved_tensors)
+    assert saved[False] - saved[True] == 4, saved
 
 
 def test_wiring_has_no_host_sync_and_fixed_launches_per_layer(monkeypatch):
