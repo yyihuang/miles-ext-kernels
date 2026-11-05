@@ -8,8 +8,8 @@ budgets of the saved one; miles' strided q / k views give the bits of contiguous
 runs the deterministic kernels and says so once; the first call builds every library of the device's architecture.
 
 The head pairs are the TP-local heads of Qwen3.5-27B at TP4 (4 key / 12 value heads) and of Qwen3.5-35B-A3B at TP1
-(16 / 32), on ragged multi-document layouts whose lengths are not multiples of the 64-token chunk. Needs a Blackwell
-GPU (SM100a / SM103a), fla and the vendored package; skips elsewhere.
+(16 / 32), on ragged multi-document layouts whose lengths are not multiples of the 64-token chunk. Needs an SM100a /
+SM103a / SM107a GPU, fla and the vendored package; skips elsewhere.
 """
 
 import argparse
@@ -30,7 +30,7 @@ from miles_ext_kernels import _variant  # noqa: E402
 from miles_ext_kernels.gdn import SUPPORTED_CAPABILITIES, configure, ops  # noqa: E402
 
 if torch.cuda.get_device_capability() not in SUPPORTED_CAPABILITIES:
-    pytest.skip("the GDN kernels need SM100a / SM103a", allow_module_level=True)
+    pytest.skip("the GDN kernels need SM100a / SM103a / SM107a", allow_module_level=True)
 
 HEAD_DIM = 128
 # (key heads, value heads) of one tensor-parallel rank

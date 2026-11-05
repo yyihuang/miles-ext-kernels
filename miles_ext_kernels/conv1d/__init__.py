@@ -3,7 +3,7 @@ Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
 Licensed under the Apache License, Version 2.0.
 https://www.apache.org/licenses/LICENSE-2.0
 
-Packed causal depthwise conv1d + SiLU (kernel size 4) training kernels for Blackwell (SM100a / SM103a): the short
+Packed causal depthwise conv1d + SiLU (kernel size 4) training kernels for SM100a / SM103a / SM107a: the short
 convolutions of miles' GDN and KDA linear-attention layers.
 
 Two variants, both FlashInfer Cake packages vendored under ``_vendor/``: ``det`` reduces the weight gradient in a

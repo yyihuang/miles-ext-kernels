@@ -3,13 +3,14 @@ Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
 Licensed under the Apache License, Version 2.0.
 https://www.apache.org/licenses/LICENSE-2.0
 
-Zero-centred RMSNorm on the vendored Cake RMSNorm kernels (SM100a / SM103a).
+Zero-centred RMSNorm on the vendored Cake RMSNorm kernels (SM100a / SM103a / SM107a).
 
 :class:`ZeroCenteredRMSNorm` is the input layernorm of miles' GDN layers, ``y = bf16(x * rstd * (1 + w))`` over the
 last dimension with ``rstd = 1 / sqrt(mean(x^2) + eps)`` in FP32. It holds ``w`` as its single ``weight`` parameter,
 as Transformer Engine's ``zero_centered_gamma`` norm and HF's ``Qwen3NextRMSNorm`` do, so checkpoints and weight
 conversion see the same parameter, and hands the kernels the FP32 effective weight ``1 + w`` (their ``_w32`` routes).
 The kernels return the weight gradient in FP32; autograd rounds it into the parameter's dtype, as TE's dgamma.
+SM107a needs a CUDA 13.4 or newer toolkit to build its kernels.
 
 Both variants go through FlashInfer's non-deterministic package (``_vendor/cake_rmsnorm_train_backend``):
 ``deterministic=True`` runs its deterministic sibling (``_vendor/cake_rmsnorm_det_train_backend``: a main kernel and
@@ -43,11 +44,11 @@ __all__ = [
     "zero_centered_rmsnorm",
 ]
 
-SUPPORTED_CAPABILITIES = ((10, 0), (10, 3))
+SUPPORTED_CAPABILITIES = tuple(cake_native.ARCH_BY_CAPABILITY)
 # Set by ``miles_ext_kernels.rmsnorm.configure`` (--cake-rmsnorm-variant) and read when a module is built and called.
 VARIANT = "fast"
 
-_ARCH_OF = {(10, 0): "sm_100a", (10, 3): "sm_103a"}
+_ARCH_OF = cake_native.ARCH_BY_CAPABILITY
 _FAMILY = "rmsnorm"
 _BACKEND = "--linear-attention-input-norm cake"
 # (variant, arch, hidden) already built by prebuild
@@ -93,21 +94,25 @@ def supported_hidden_sizes(arch: str) -> tuple[int, ...]:
 
 
 def _arch(device) -> str:
-    """The architecture of ``device`` (default: the current CUDA device), checked to be supported."""
+    """The architecture of ``device`` (default: the current CUDA device), checked to be supported and its kernels to
+    build with the toolkit."""
     if not torch.cuda.is_available():
         raise ValueError(f"{_BACKEND} needs a CUDA device of compute capability {SUPPORTED_CAPABILITIES}")
     capability = tuple(torch.cuda.get_device_capability(device))
     if capability not in _ARCH_OF:
         raise ValueError(
-            f"{_BACKEND} runs on compute capability {SUPPORTED_CAPABILITIES} (SM100a / SM103a), "
+            f"{_BACKEND} runs on compute capability {SUPPORTED_CAPABILITIES} (SM100a / SM103a / SM107a), "
             f"not {capability}; use --linear-attention-input-norm te"
         )
-    return _ARCH_OF[capability]
+    arch = _ARCH_OF[capability]
+    cake_native.check_toolkit(arch, "the Cake RMSNorm kernels")
+    return arch
 
 
 def check_supported(hidden_size: int, device=None) -> None:
     """Raise ``ValueError`` unless the Cake kernels normalize ``hidden_size`` features on ``device`` (default: the
-    current CUDA device). The hidden size is checked first, so a CPU-only process gets that error too."""
+    current CUDA device). The hidden size is checked first, so a CPU-only process gets that error too. ``RuntimeError``
+    when the toolkit cannot build the device's kernels (SM107a needs CUDA 13.4 or newer)."""
     sizes = {arch: supported_hidden_sizes(arch) for arch in _ARCH_OF.values()}
     if not any(hidden_size in supported for supported in sizes.values()):
         raise ValueError(

@@ -5,7 +5,7 @@ GLM-5.3-Flash) on ~32k packed tokens with documents shorter than the kernel, wit
 FlashInfer's S x C > 2^31 case. ``y`` and ``dx`` within one BF16 ulp of the reference; ``dweight`` within the
 deterministic package's budgets; ``det`` bitwise run to run; ``fast`` with ``y`` and ``dx`` bitwise ``det``'s and
 ``dweight`` within budget of ``det``; ``fast`` runs ``det`` under torch's deterministic algorithms. Needs SM100a /
-SM103a; skips elsewhere.
+SM103a / SM107a; skips elsewhere.
 """
 
 import argparse
@@ -17,11 +17,11 @@ torch = pytest.importorskip("torch")
 if not torch.cuda.is_available():
     pytest.skip("CUDA device required", allow_module_level=True)
 
-from miles_ext_kernels import _variant  # noqa: E402
+from miles_ext_kernels import _variant, cake_native  # noqa: E402
 from miles_ext_kernels.conv1d import arguments, ops  # noqa: E402
 
 if tuple(torch.cuda.get_device_capability()) not in ops.SUPPORTED_CAPABILITIES:
-    pytest.skip("the Cake short-conv kernels need SM100a / SM103a", allow_module_level=True)
+    pytest.skip("the Cake short-conv kernels need SM100a / SM103a / SM107a", allow_module_level=True)
 
 WIDTH = 4
 F32, BF16 = torch.float32, torch.bfloat16
@@ -307,6 +307,16 @@ def test_unsupported_convolutions_are_rejected(channels, kernel_size, activation
 def test_miles_convolutions_are_supported():
     for channels in MILES_CHANNELS:
         ops.check_supported(channels, 4, "silu")
+
+
+def test_the_device_needs_its_architectures_toolkit(monkeypatch):
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device=None: (9, 0))
+    with pytest.raises(ValueError, match=r"SM100a / SM103a / SM107a"):
+        ops.check_supported(4096, 4, "silu")
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device=None: (10, 7))
+    monkeypatch.setattr(cake_native, "MIN_CUDA", {**cake_native.MIN_CUDA, "sm_107a": (99, 0)})
+    with pytest.raises(RuntimeError, match=r"short-conv kernels for sm_107a needs CUDA 99\.0 or newer"):
+        ops.check_supported(4096, 4, "silu")
 
 
 @pytest.mark.parametrize("variant", ["det", "fast"])

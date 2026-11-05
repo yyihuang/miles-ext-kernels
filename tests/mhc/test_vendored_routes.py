@@ -1,9 +1,10 @@
 """The vendored mHC packages serve what ``miles_ext_kernels.mhc`` relies on (torch-free, no device).
 
 Each package's ``cake_jit.py`` is loaded by file path (its module level imports neither torch nor the package): every
-library a route (or the head) can launch on sm_100a / sm_103a has its ``build.json`` entry, so ``mhc.prebuild`` and the
-first calls never ask for a library the manifest does not build, and the shapes, constants and architectures of the
-three packages are the ones ``miles_ext_kernels.mhc`` validates against.
+library a route (or the head) can launch on sm_100a / sm_103a / sm_107a has its ``build.json`` entry, so
+``mhc.prebuild`` and the first calls never ask for a library the manifest does not build, and the shapes, constants,
+architectures and per-architecture hidden sizes (4096 only on sm_107a) of the three packages are the ones
+``miles_ext_kernels.mhc`` validates against.
 """
 
 import importlib.util
@@ -12,11 +13,14 @@ from pathlib import Path
 
 import pytest
 
+from miles_ext_kernels import cake_native
 from miles_ext_kernels.mhc import arguments
 
 VENDOR = Path(arguments.__file__).resolve().parent / "_vendor"
 DET, FAST, HEAD = "cake_mhc_det_train_backend", "cake/cake_mhc_train_backend", "cake_mhc_det_train_head_backend"
-ARCHES = ("sm_100a", "sm_103a")
+# the hidden sizes every route (and the head) serves on each architecture
+HIDDEN_BY_ARCH = {"sm_100a": arguments.HIDDEN_SIZES, "sm_103a": arguments.HIDDEN_SIZES, "sm_107a": (4096,)}
+ARCHES = tuple(HIDDEN_BY_ARCH)
 
 if not (VENDOR / "VENDORED.json").is_file():
     pytest.skip("the mHC Cake packages are not vendored in this checkout", allow_module_level=True)
@@ -48,8 +52,8 @@ def test_every_route_library_is_in_the_manifest(package, arch):
     jit = _cake_jit(package)
     libraries = _libraries(package)
 
-    assert jit.supported_hidden_sizes(arch) == arguments.HIDDEN_SIZES
-    for hidden in arguments.HIDDEN_SIZES:
+    assert jit.supported_hidden_sizes(arch) == HIDDEN_BY_ARCH[arch]
+    for hidden in HIDDEN_BY_ARCH[arch]:
         for kind in jit.KINDS:
             for record in jit.route_modules(arch, hidden, kind):
                 assert jit.MODULES[record]["hidden"] == hidden
@@ -65,7 +69,7 @@ def test_the_connection_constants_are_the_ones_miles_runs(package):
     assert jit.MAPPING_ROWS == 2 * arguments.STREAMS + arguments.STREAMS**2
     # the defaults of miles_ext_kernels.mhc.ops (RMS_EPS, HC_EPS, SINKHORN_ITERS)
     assert (jit.RMS_EPS, jit.HC_EPS, jit.SINKHORN_ITERS) == (1e-5, 1e-6, 20)
-    assert {(10, 0): "sm_100a", (10, 3): "sm_103a"}.items() <= jit.ARCH_BY_CAPABILITY.items()
+    assert jit.ARCH_BY_CAPABILITY == cake_native.ARCH_BY_CAPABILITY
 
 
 @pytest.mark.parametrize("arch", ARCHES)
@@ -73,7 +77,7 @@ def test_the_head_libraries_are_in_the_manifest(arch):
     jit = _cake_jit(HEAD)
     libraries = _libraries(HEAD)
 
-    assert jit.supported_hidden_sizes(arch) == arguments.HIDDEN_SIZES
+    assert jit.supported_hidden_sizes(arch) == HIDDEN_BY_ARCH[arch]
     assert jit.STREAMS == arguments.STREAMS
     for role in ("head_fwd", "head_bwd"):
         assert jit.library_name(jit.ROLES[role], arch) in libraries
