@@ -31,8 +31,9 @@ Check::
 
 :func:`check_family` verifies a family's vendored tree against its ``VENDORED.json``: the exact file set and every
 blob, ``cake_build.py`` equal to FlashInfer's loader, no ``aot/``, ``build.json`` schema ``cake-build/1`` with its
-recorded Cake revision, every source digest of the manifest, sm_100a and sm_103a libraries, and no ``flashinfer``
-import or environment read in the vendored Python modules (allow-listed exceptions in :data:`ENV_READ_ALLOWED`).
+recorded Cake revision, every source digest of the manifest, sm_100a, sm_103a and sm_107a libraries, and no
+``flashinfer`` import or environment read in the vendored Python modules (allow-listed exceptions in
+:data:`ENV_READ_ALLOWED`).
 """
 
 from __future__ import annotations
@@ -55,7 +56,7 @@ MANIFEST = "VENDORED.json"
 # git blob of FlashInfer's cake_build.py, the loader every Cake package carries byte-identically
 CAKE_BUILD_BLOB = "00756137eb159e30a77907eda84fd245123d87ea"
 BUILD_SCHEMA = "cake-build/1"
-REQUIRED_ARCHES = frozenset({"sm_100a", "sm_103a"})
+REQUIRED_ARCHES = frozenset({"sm_100a", "sm_103a", "sm_107a"})
 # family -> package-relative modules that may read the environment (never imported by this repo)
 ENV_READ_ALLOWED: dict[str, frozenset[str]] = {}
 
