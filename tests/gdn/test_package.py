@@ -50,6 +50,13 @@ def test_importing_the_package_and_registering_its_arguments_does_not_import_tor
     assert result.returncode == 0, result.stderr
 
 
+def test_every_stage_has_the_export_sm107a_compiles():
+    """SM107a compiles the SM103a records (``_jit.EXPORT_ARCH``), so every stage must carry one."""
+    registry = json.loads((GDN / "registry.json").read_text())
+
+    assert sorted(stage for stage, record in registry.items() if "sm_103a" not in record["arches"]) == []
+
+
 def test_every_source_the_registry_names_is_under_csrc():
     sources = _registry_sources()
 

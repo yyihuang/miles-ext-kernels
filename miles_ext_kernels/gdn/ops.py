@@ -3,7 +3,7 @@ Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
 Licensed under the Apache License, Version 2.0.
 https://www.apache.org/licenses/LICENSE-2.0
 
-Deterministic ``chunk_gated_delta_rule`` (forward + backward) on the generated kernels (SM100a / SM103a).
+Deterministic ``chunk_gated_delta_rule`` (forward + backward) on the generated kernels (SM100a / SM103a / SM107a).
 
 Drop-in replacement for ``fla.ops.gated_delta_rule.chunk_gated_delta_rule`` (FLA v0.5.2) as the
 Qwen GDN wrappers call it: ``[B, T, H, K]`` inputs, packed varlen through ``cu_seqlens``, in-kernel
@@ -441,7 +441,7 @@ def _scan_stage(kind: str, config: tuple[int, int], device: torch.device, arch: 
     record = _scan_record(kind, vb, ks, arch)
     if major < 9 or int(record["scan"]["select_smem_bytes"]) > smem_optin:
         raise NotImplementedError(
-            f"the register-resident {kind} scan does not fit device {device_index} (only Blackwell is supported)"
+            f"the register-resident {kind} scan does not fit device {device_index} (only SM100a / SM103a / SM107a)"
         )
     return f"{kind}_r{vb}k{ks}", vb
 
@@ -2003,13 +2003,13 @@ def _fast_prebuild(arch: str) -> None:
 def _fast_chunk_gated_delta_rule(
     q, k, v, g, beta, scale, initial_state, output_final_state, cu_seqlens, cu_seqlens_cpu, use_qk_l2norm_in_kernel
 ):
-    """The fast package's ``chunk_gated_delta_rule`` on SM100a / SM103a, with this module's :data:`SAVE_STATE`.
+    """The fast package's ``chunk_gated_delta_rule`` on SM100a / SM103a / SM107a with this module's :data:`SAVE_STATE`.
 
     ``cu_seqlens_cpu`` selects the package's host-table route as it selects the deterministic kernels' host table.
     The package makes strided q / k / v contiguous itself.
     """
     index = q.device.index if q.device.index is not None else torch.cuda.current_device()
-    arch = _arch_of(index)  # the deterministic kernels' architectures: SM100a / SM103a
+    arch = _arch_of(index)  # the deterministic kernels' architectures: SM100a / SM103a / SM107a
     package = _fast_package()
     if PREBUILD:
         _fast_prebuild(arch)

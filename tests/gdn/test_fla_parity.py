@@ -2,8 +2,8 @@
 generated from: output and every input gradient within the BF16 tolerance, and bit-identical repeated passes.
 
 Packed varlen (``cu_seqlens``) and an equal-length batch of two sequences, with one and two value heads per key head,
-as miles' head-sharded GDN layer feeds the kernel.  Needs a CUDA device; the tests need Blackwell (SM100a / SM103a)
-and fla, and skip elsewhere.
+as miles' head-sharded GDN layer feeds the kernel.  Needs a CUDA device; the tests need SM100a / SM103a / SM107a and
+fla, and skip elsewhere.
 """
 
 import pytest
@@ -22,7 +22,7 @@ SEQLENS = [128, 256, 128]
 
 def _fla_kernel():
     if torch.cuda.get_device_capability() not in SUPPORTED_CAPABILITIES:
-        pytest.skip("the deterministic GDN kernels need SM100a / SM103a")
+        pytest.skip("the deterministic GDN kernels need SM100a / SM103a / SM107a")
     return pytest.importorskip("fla.ops.gated_delta_rule").chunk_gated_delta_rule
 
 

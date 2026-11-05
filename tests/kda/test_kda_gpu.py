@@ -4,8 +4,8 @@ against the exact FP64 recurrence, bit-identical repeats and backward routes, an
 Shapes: ragged packs of one and several documents whose lengths are not multiples of 64, at the per-rank head counts
 miles runs (Kimi-K3's 96 KDA heads at tensor parallelism 2 / 4 / 8: 48 / 24 / 12; GLM-5.3-Flash: 64) and the
 segmented route's 1 and 4 heads. The first test of the module compiles every library of those head counts
-(``TVM_FFI_CACHE_DIR``, once per toolkit and machine). Needs an SM100a / SM103a GPU, torch and tvm-ffi; the fla
-parity rows also need flash-linear-attention, and skip without it. ``-rP`` prints the fla parity tables.
+(``TVM_FFI_CACHE_DIR``, once per toolkit and machine). Needs an SM100a / SM103a / SM107a GPU, torch and tvm-ffi; the
+fla parity rows also need flash-linear-attention, and skip without it. ``-rP`` prints the fla parity tables.
 """
 
 import os
@@ -15,8 +15,8 @@ import pytest
 torch = pytest.importorskip("torch")
 if not torch.cuda.is_available():
     pytest.skip("CUDA device required", allow_module_level=True)
-if tuple(torch.cuda.get_device_capability()) not in ((10, 0), (10, 3)):
-    pytest.skip("the Cake KDA kernels are validated on SM100a / SM103a", allow_module_level=True)
+if tuple(torch.cuda.get_device_capability()) not in ((10, 0), (10, 3), (10, 7)):
+    pytest.skip("the Cake KDA kernels run on SM100a / SM103a / SM107a", allow_module_level=True)
 pytest.importorskip("tvm_ffi")
 
 from miles_ext_kernels import cake_native  # noqa: E402
@@ -192,7 +192,7 @@ def test_head_counts_outside_1_to_64_and_batches_are_rejected():
 
 def test_the_device_needs_its_architectures_toolkit(monkeypatch):
     monkeypatch.setattr(torch.cuda, "get_device_capability", lambda *args: (9, 0))
-    with pytest.raises(RuntimeError, match="compute capability 10.0 or 10.3"):
+    with pytest.raises(RuntimeError, match="compute capability 10.0, 10.3 or 10.7"):
         ops.device_arch()
     monkeypatch.setattr(torch.cuda, "get_device_capability", lambda *args: (10, 7))
     monkeypatch.setattr(cake_native, "get_cuda_version", lambda: cake_native.CudaVersion(13, 0, "13.0.88"))
