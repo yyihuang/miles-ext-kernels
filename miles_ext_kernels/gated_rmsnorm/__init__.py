@@ -3,7 +3,7 @@ Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
 Licensed under the Apache License, Version 2.0.
 https://www.apache.org/licenses/LICENSE-2.0
 
-SiLU-gated RMSNorm training kernels for Blackwell (SM100a / SM103a): ``RMSNorm(x) * weight * SiLU(z)`` over rows of
+SiLU-gated RMSNorm training kernels for SM100a / SM103a / SM107a: ``RMSNorm(x) * weight * SiLU(z)`` over rows of
 128, the output norm of miles' GDN linear-attention layers.
 
 Two variants, both FlashInfer Cake packages vendored under ``_vendor/``: ``det`` sums the weight gradient in FP32 per
