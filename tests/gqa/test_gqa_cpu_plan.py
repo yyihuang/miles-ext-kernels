@@ -2,8 +2,9 @@
 
 ``cake_jit`` (the registry, the grids and the scratch layout; it imports only ``typing``) is loaded by path, so neither
 torch nor the package's loader is imported. Checked: every stage ``ops.STAGES`` launches has exactly one library per
-target architecture that the CUDA 13.0 toolkit of the miles image builds; the grids cover every tile of generated
-layouts; the backward scratch is aligned and sized.
+target architecture that the architecture's toolkit builds (the CUDA 13.0 toolkit of the miles image for SM100a /
+SM103a, CUDA 13.4 for SM107a); the grids cover every tile of generated layouts; the backward scratch is aligned and
+sized.
 """
 
 import ast
@@ -17,8 +18,9 @@ import pytest
 PACKAGE_DIR = Path(__file__).resolve().parents[2] / "miles_ext_kernels" / "gqa" / "_vendor" / "cake_gqa_train"
 # ops.STAGES, the forward and the BF16 dK / dV backward, which is the path miles runs
 STAGES = ("fwd", "bwd_pre", "bwd_bf16", "bwd_post")
-ARCHES = ("sm_100a", "sm_103a")
-TOOLKIT = (13, 0)
+# target architecture -> the toolkit that builds it
+TOOLKIT = {"sm_100a": (13, 0), "sm_103a": (13, 0), "sm_107a": (13, 4)}
+ARCHES = tuple(TOOLKIT)
 D = 256
 
 
@@ -60,7 +62,7 @@ def test_every_stage_has_one_library_per_target_arch_the_toolkit_builds(cake_jit
             assert serving == [cake_jit.stage_record(stage, arch)], (stage, arch, serving)
             entry = entries[f"{cake_jit.MODULES[serving[0]]['library']}_{arch}"]
             assert entry["arch"] == arch
-            assert tuple(int(part) for part in entry["min_cuda"].split(".")) <= TOOLKIT, entry["name"]
+            assert tuple(int(part) for part in entry["min_cuda"].split(".")) <= TOOLKIT[arch], entry["name"]
             launch = cake_jit.MODULES[serving[0]]["launch"]
             assert launch["cooperative"] is False and launch["use_pdl"] is False, stage
 
