@@ -3,9 +3,9 @@ Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
 Licensed under the Apache License, Version 2.0.
 https://www.apache.org/licenses/LICENSE-2.0
 
-The ragged BF16 MoE grouped GEMM miles calls (SM100a / SM103a), on two vendored FlashInfer packages whose libraries
-:mod:`miles_ext_kernels.cake_native` builds and loads: ``_vendor/cake_moe_grouped_det_gemm`` (``det``) and
-``_vendor/cake/cake_moe_grouped_gemm`` (``fast``).
+The ragged BF16 MoE grouped GEMM miles calls (SM100a / SM103a / SM107a), on two vendored FlashInfer packages whose
+libraries :mod:`miles_ext_kernels.cake_native` builds and loads (SM107a with a CUDA 13.4 or newer toolkit):
+``_vendor/cake_moe_grouped_det_gemm`` (``det``) and ``_vendor/cake/cake_moe_grouped_gemm`` (``fast``).
 
 :func:`grouped_mm` is ``torch._grouped_mm(x, w.transpose(-2, -1), offs=offs)`` for ``x [sum_m, K]``, ``w [E, N, K]``
 and the int32 cumulative row ends ``offs [E]`` of the groups, differentiable in ``x`` and ``w``. The kernels read
@@ -32,7 +32,7 @@ from miles_ext_kernels import _variant, cake_native
 
 __all__ = ["SUPPORTED_CAPABILITIES", "VARIANT", "check_grouped_dims", "grouped_mm", "prebuild"]
 
-SUPPORTED_CAPABILITIES = {(10, 0): "sm_100a", (10, 3): "sm_103a"}
+SUPPORTED_CAPABILITIES = dict(cake_native.ARCH_BY_CAPABILITY)
 # The variant grouped_mm runs when its caller names none; arguments.configure sets it from the parsed arguments.
 VARIANT = "fast"
 _FAMILY = "moe_grouped_gemm"
@@ -80,13 +80,15 @@ def _device_index(device) -> int:
 
 @functools.cache
 def _arch_of(index: int) -> str:
+    """The architecture of device ``index``, checked to be supported and its programs to build with the toolkit."""
     major, minor = torch.cuda.get_device_capability(index)
     arch = SUPPORTED_CAPABILITIES.get((major, minor))
     if arch is None:
         raise RuntimeError(
-            f"the Cake MoE grouped GEMM runs on SM100a / SM103a (B200, B300, GB300); cuda:{index} has compute "
-            f"capability {major}.{minor}"
+            f"the Cake MoE grouped GEMM runs on SM100a / SM103a / SM107a (B200, B300, GB300, R200); cuda:{index} has "
+            f"compute capability {major}.{minor}"
         )
+    cake_native.check_toolkit(arch, "the Cake MoE grouped GEMM")
     return arch
 
 

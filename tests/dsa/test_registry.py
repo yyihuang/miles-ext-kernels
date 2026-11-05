@@ -13,7 +13,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DSA = REPO_ROOT / "miles_ext_kernels" / "dsa"
-ARCHES = {"sm_100a", "sm_103a"}
+ARCHES = {"sm_100a", "sm_103a"}  # exported; SM107a compiles the SM103a records (_jit.EXPORT_ARCH)
 
 TC_STAGES = {f"dsa_attention_fwd_tc_h{h}_d512t{t}" for h in (8, 16, 32, 64) for t in (64, 0)}
 TC_BWD_STAGES = {f"dsa_attention_bwd_tc_h{h}_d512t{t}" for h in (8, 16, 32, 64) for t in (64, 0)}

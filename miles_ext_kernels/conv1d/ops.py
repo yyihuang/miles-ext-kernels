@@ -3,7 +3,7 @@ Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
 Licensed under the Apache License, Version 2.0.
 https://www.apache.org/licenses/LICENSE-2.0
 
-Packed causal depthwise conv1d + SiLU (kernel size 4) on the vendored Cake kernels (SM100a / SM103a).
+Packed causal depthwise conv1d + SiLU (kernel size 4) on the vendored Cake kernels (SM100a / SM103a / SM107a).
 
 :func:`causal_conv1d` is the short convolution of miles' GDN and KDA layers: BF16 ``x`` ``[1, S, C]`` (or
 ``[S, C]``) holds the packed documents ``cu_seqlens`` delimits, ``weight`` ``[C, 4]`` the FP32 or BF16 taps
@@ -21,7 +21,7 @@ route miles uses (FP32 or BF16 taps, either SiLU' policy), so ``fast`` never fal
 with a one-time warning, only while ``torch.use_deterministic_algorithms(True)`` is in effect.
 
 The vendored packages compile their libraries on first use through :mod:`miles_ext_kernels.cake_native`;
-:func:`prebuild` builds the ones a layer runs before its first step.
+:func:`prebuild` builds the ones a layer runs before its first step. SM107a needs a CUDA 13.4 or newer toolkit.
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ from miles_ext_kernels._variant import VARIANTS, warn_det_fallback
 
 __all__ = ["SUPPORTED_CAPABILITIES", "causal_conv1d", "check_supported", "prebuild"]
 
-SUPPORTED_CAPABILITIES = ((10, 0), (10, 3))
+SUPPORTED_CAPABILITIES = tuple(cake_native.ARCH_BY_CAPABILITY)
 KERNEL_SIZE = 4
 CHANNEL_MULTIPLE = 8
 SILU_GRAD_PREACTIVATIONS = ("bf16", "fp32")
@@ -83,21 +83,24 @@ def _policy(silu_grad_preactivation: str | None) -> str:
 
 
 def _capability(device) -> tuple[int, int]:
-    """The compute capability of ``device`` (default: the current CUDA device), checked to be supported."""
+    """The compute capability of ``device`` (default: the current CUDA device), checked to be supported and its
+    kernels to build with the toolkit."""
     if not torch.cuda.is_available():
         raise ValueError(f"{_BACKEND} needs a CUDA device of compute capability {SUPPORTED_CAPABILITIES}")
     capability = tuple(torch.cuda.get_device_capability(device))
     if capability not in SUPPORTED_CAPABILITIES:
         raise ValueError(
-            f"{_BACKEND} runs on compute capability {SUPPORTED_CAPABILITIES} (SM100a / SM103a), "
+            f"{_BACKEND} runs on compute capability {SUPPORTED_CAPABILITIES} (SM100a / SM103a / SM107a), "
             f"not {capability}; use --linear-attention-conv-backend fla"
         )
+    cake_native.check_toolkit(cake_native.ARCH_BY_CAPABILITY[capability], "the Cake short-conv kernels")
     return capability
 
 
 def check_supported(channels: int, kernel_size: int, activation: str, device=None) -> None:
     """Raise ``ValueError`` unless the Cake kernels run this short convolution on ``device`` (default: the current
-    CUDA device): kernel size 4, SiLU, a channel count that is a multiple of 8, compute capability 10.0 or 10.3."""
+    CUDA device): kernel size 4, SiLU, a channel count that is a multiple of 8, compute capability 10.0, 10.3 or 10.7;
+    ``RuntimeError`` when the toolkit cannot build the device's kernels (SM107a needs CUDA 13.4 or newer)."""
     if kernel_size != KERNEL_SIZE:
         raise ValueError(f"{_BACKEND} needs kernel size {KERNEL_SIZE}, got {kernel_size}")
     if activation != "silu":

@@ -2,7 +2,7 @@
 models (expert-parallel local shapes): the forward, input and weight gradients against a per-group FP32 reference over
 imbalanced groups with empty and one-row ones, bit-identical ``det`` reruns, ``fast`` giving ``det``'s forward and
 input-gradient bits, its unordered weight-gradient tail, the fallback to ``det`` under torch's deterministic mode, and
-the prebuild hook. Needs a CUDA device; the tests need SM100a / SM103a and skip elsewhere.
+the prebuild hook. Needs a CUDA device; the tests need SM100a / SM103a / SM107a and skip elsewhere.
 """
 
 import importlib
@@ -14,11 +14,11 @@ torch = pytest.importorskip("torch")
 if not torch.cuda.is_available():
     pytest.skip("CUDA device required", allow_module_level=True)
 
-from miles_ext_kernels import _variant  # noqa: E402
+from miles_ext_kernels import _variant, cake_native  # noqa: E402
 from miles_ext_kernels.moe_grouped_gemm import SUPPORTED_CAPABILITIES, grouped_mm, ops, prebuild  # noqa: E402
 
 if torch.cuda.get_device_capability() not in SUPPORTED_CAPABILITIES:
-    pytest.skip("the Cake MoE grouped GEMM needs SM100a / SM103a", allow_module_level=True)
+    pytest.skip("the Cake MoE grouped GEMM needs SM100a / SM103a / SM107a", allow_module_level=True)
 
 SEED = 20260930
 # the vendored package's bounds of a BF16 output against its reference
@@ -210,6 +210,20 @@ def test_calls_the_programs_do_not_serve_are_refused():
         grouped_mm(x.float(), w, offs)
     with pytest.raises(ValueError, match="x \\[sum_m, K\\] and w \\[E, N, K\\]"):
         grouped_mm(x, w[..., :512], offs)
+
+
+def test_the_device_needs_its_architectures_toolkit(monkeypatch):
+    ops._arch_of.cache_clear()  # the architecture of a device index is cached once checked
+    try:
+        monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device=None: (9, 0))
+        with pytest.raises(RuntimeError, match="SM100a / SM103a / SM107a"):
+            prebuild()
+        monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device=None: (10, 7))
+        monkeypatch.setattr(cake_native, "MIN_CUDA", {**cake_native.MIN_CUDA, "sm_107a": (99, 0)})
+        with pytest.raises(RuntimeError, match=r"MoE grouped GEMM for sm_107a needs CUDA 99\.0 or newer"):
+            prebuild()
+    finally:
+        ops._arch_of.cache_clear()
 
 
 @pytest.mark.parametrize("variant", _variant.VARIANTS)

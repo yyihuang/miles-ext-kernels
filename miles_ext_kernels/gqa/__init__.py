@@ -3,7 +3,7 @@ Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
 Licensed under the Apache License, Version 2.0.
 https://www.apache.org/licenses/LICENSE-2.0
 
-Packed causal GQA attention training kernels, head dimension 256, for Blackwell (SM100a / SM103a).
+Packed causal GQA attention training kernels, head dimension 256, for SM100a / SM103a / SM107a.
 
 The Cake kernels of FlashInfer's ``flashinfer.gqa_train``, vendored under ``_vendor/cake_gqa_train``: forward and
 backward over packed variable-length segments, BF16 ``q [T, H_q, 256]`` and ``k`` / ``v [T, H_kv, 256]`` with

@@ -3,8 +3,9 @@ Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
 Licensed under the Apache License, Version 2.0.
 https://www.apache.org/licenses/LICENSE-2.0
 
-The dense projection GEMMs miles calls (SM100a / SM103a), on the vendored FlashInfer package
-``_vendor/dense_projection_det_gemm``, whose libraries :mod:`miles_ext_kernels.cake_native` builds and loads.
+The dense projection GEMMs miles calls (SM100a / SM103a / SM107a), on the vendored FlashInfer package
+``_vendor/dense_projection_det_gemm``, whose libraries :mod:`miles_ext_kernels.cake_native` builds and loads (SM107a
+with a CUDA 13.4 or newer toolkit).
 
 K1 (``dense_projection_det_gemm``) computes ``out[l, m, n] = sum_k A[l, m, k] B[l, k, n]`` over strided BF16 views with
 FP32 accumulation and one rounding at the store. Its launch plan, split-K and stream-K fixup order are a pure function
@@ -45,7 +46,7 @@ __all__ = [
     "router_gating",
 ]
 
-SUPPORTED_CAPABILITIES = {(10, 0): "sm_100a", (10, 3): "sm_103a"}
+SUPPORTED_CAPABILITIES = dict(cake_native.ARCH_BY_CAPABILITY)
 # The orientation of the per-head weights of batched_projection: [H, D_in, D_out] or [H, D_out, D_in].
 WEIGHT_LAYOUTS = ("in_out", "out_in")
 
@@ -70,13 +71,15 @@ def _device_index(device) -> int:
 
 @functools.cache
 def _arch_of(index: int) -> str:
+    """The architecture of device ``index``, checked to be supported and its programs to build with the toolkit."""
     major, minor = torch.cuda.get_device_capability(index)
     arch = SUPPORTED_CAPABILITIES.get((major, minor))
     if arch is None:
         raise RuntimeError(
-            f"the Cake dense projection GEMMs run on SM100a / SM103a (B200, B300, GB300); cuda:{index} has compute "
-            f"capability {major}.{minor}"
+            f"the Cake dense projection GEMMs run on SM100a / SM103a / SM107a (B200, B300, GB300, R200); cuda:{index} "
+            f"has compute capability {major}.{minor}"
         )
+    cake_native.check_toolkit(arch, "the Cake dense projection GEMMs")
     return arch
 
 

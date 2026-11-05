@@ -328,6 +328,54 @@ def test_a_library_above_the_toolkit_raises_and_warmups_leave_it_out(package, to
     assert _calls(nvcc) == []
 
 
+def test_an_architecture_above_the_toolkit_raises_whatever_its_entry_records(package, toolkit, tvm_ffi):
+    """nvcc 13.0 to 13.3 reject compute_107a: an SM107a entry recording a lower min_cuda still needs CUDA 13.4."""
+    nvcc = toolkit("13.0.88")
+    cake_native.install(package)
+    _entry(package, "prog_sm_107a")["min_cuda"] = "13.0"
+
+    error = r"compiling prog_sm_107a_\w+ for sm_107a needs CUDA 13\.4 or newer, but \S+ is CUDA 13\.0\.88"
+    with pytest.raises(RuntimeError, match=error):
+        package.jit_spec("prog_sm_107a")
+    with pytest.raises(RuntimeError, match=r"for sm_107a needs CUDA 13\.4 or newer"):
+        cake_native.prebuild(package, ["prog_sm_107a"])
+    assert _calls(nvcc) == []
+
+
+@pytest.mark.parametrize(
+    ("full", "arch", "need"),
+    [
+        ("13.0.88", "sm_100a", None),
+        ("13.0.88", "sm_103a", None),
+        ("12.8.93", "sm_103a", "12.9"),
+        ("13.0.88", "sm_107a", "13.4"),
+        ("13.3.73", "sm_107a", "13.4"),
+        ("13.4.92", "sm_107a", None),
+    ],
+)
+def test_check_toolkit_names_the_cuda_version_the_architecture_needs(toolkit, full, arch, need):
+    toolkit(full)
+    if need is None:
+        assert cake_native.check_toolkit(arch, "the kernels").full == full
+    else:
+        error = rf"compiling the kernels for {arch} needs CUDA {need} or newer, but \S+ is CUDA {full}"
+        with pytest.raises(RuntimeError, match=error):
+            cake_native.check_toolkit(arch, "the kernels")
+
+
+def test_check_toolkit_reads_the_given_nvcc(toolkit):
+    older = toolkit("13.0.88")
+    toolkit("13.4.92")  # CUDA_HOME
+
+    assert cake_native.check_toolkit("sm_107a", "the kernels").full == "13.4.92"
+    with pytest.raises(RuntimeError, match=r"needs CUDA 13\.4 or newer"):
+        cake_native.check_toolkit("sm_107a", "the kernels", str(older))
+
+
+def test_every_architecture_has_a_toolkit_floor():
+    assert set(cake_native.ARCH_BY_CAPABILITY.values()) == set(cake_native.MIN_CUDA)
+
+
 def test_the_library_is_cached_outside_the_package_under_a_toolchain_key(
     package, toolkit, tvm_ffi, cache, monkeypatch
 ):

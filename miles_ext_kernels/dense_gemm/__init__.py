@@ -3,7 +3,7 @@ Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
 Licensed under the Apache License, Version 2.0.
 https://www.apache.org/licenses/LICENSE-2.0
 
-Deterministic dense projection GEMMs for Blackwell (SM100a / SM103a), on the Cake programs of the vendored FlashInfer
+Deterministic dense projection GEMMs for SM100a / SM103a / SM107a, on the Cake programs of the vendored FlashInfer
 package ``dense_projection_det_gemm``:
 
 - :func:`batched_projection`: the per-head projections of the MLA / DSA attention layers (the q-absorb and value

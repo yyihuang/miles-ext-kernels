@@ -3,7 +3,7 @@ Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
 Licensed under the Apache License, Version 2.0.
 https://www.apache.org/licenses/LICENSE-2.0
 
-The entry points of the Cake four-stream mHC training kernels (SM100a / SM103a).
+The entry points of the Cake four-stream mHC training kernels (SM100a / SM103a / SM107a).
 
 The function of one connection, per token ``t`` (FP32 arithmetic, BF16 only at the activation boundaries)::
 
@@ -46,6 +46,9 @@ calls that name none.
 Each package keeps one default workspace per device, hidden size and token-count bucket, shared by every call on the
 device: the connections of a model run one after another on the current stream. :func:`prebuild` compiles every
 library the routes of one hidden size can launch, ahead of the first step (all ranks may call it at once).
+
+FlashInfer exports the three packages for SM107a at hidden 4096 only (:func:`supported_hidden_sizes`); its libraries
+build with a CUDA 13.4 or newer toolkit.
 """
 
 from __future__ import annotations
@@ -70,10 +73,11 @@ __all__ = [
     "mhc_head",
     "mhc_prepare",
     "prebuild",
+    "supported_hidden_sizes",
 ]
 
-# The architectures this package ships for (FlashInfer's packages also export sm_107a at hidden 4096).
-SUPPORTED_CAPABILITIES = ((10, 0), (10, 3))
+# The architectures this package ships for (sm_107a at hidden 4096 only: :func:`supported_hidden_sizes`).
+SUPPORTED_CAPABILITIES = tuple(cake_native.ARCH_BY_CAPABILITY)
 # FlashInfer's defaults of the epsilons and the Sinkhorn count (the epsilons are launch arguments of every program).
 RMS_EPS = 1e-5
 HC_EPS = 1e-6
@@ -143,6 +147,12 @@ def is_supported(device: Any, hidden: int | None = None) -> bool:
         and _fast().is_cake_mhc_train_supported(device, hidden)
         and _head().is_cake_mhc_det_train_head_supported(device, hidden)
     )
+
+
+def supported_hidden_sizes(device: Any) -> tuple[int, ...]:
+    """The hidden sizes :func:`is_supported` accepts on ``device``: all of :data:`HIDDEN_SIZES` on SM100a / SM103a,
+    4096 on SM107a, none on another device."""
+    return tuple(hidden for hidden in HIDDEN_SIZES if is_supported(device, hidden))
 
 
 def mhc_prepare(
@@ -230,7 +240,9 @@ def prebuild(
     at ``hidden`` on ``device`` with ``variant`` (default :data:`VARIANT`), ``max_workers`` nvcc processes at a time.
 
     Returns the library names. Libraries already in the cache are not rebuilt, and a repeated call in a process
-    compiles nothing; ranks starting at once build each library once (``cake_native``'s file lock).
+    compiles nothing; ranks starting at once build each library once (``cake_native``'s file lock). ``ValueError`` for
+    a hidden size the device's architecture does not serve; ``RuntimeError`` when the toolkit cannot build its
+    libraries (SM107a needs CUDA 13.4 or newer).
     """
     device = _device(device)
     capability = tuple(torch.cuda.get_device_capability(device))
@@ -239,6 +251,12 @@ def prebuild(
     variant = _resolve(variant)
     package = _fast() if variant == "fast" else _det()
     arch = package.cake_jit.arch_for_capability(capability)
+    if int(hidden) not in package.cake_jit.supported_hidden_sizes(arch):
+        raise ValueError(
+            f"the Cake mHC kernels run the hidden sizes {package.cake_jit.supported_hidden_sizes(arch)} on {arch}, "
+            f"not {hidden}"
+        )
+    cake_native.check_toolkit(arch, "the Cake mHC kernels")
     names = _route_libraries(package.cake_jit, arch, int(hidden), int(sinkhorn_iters))
     head_names: tuple[str, ...] = ()
     if head:
