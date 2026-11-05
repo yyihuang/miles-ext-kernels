@@ -2,7 +2,7 @@
 
 One exact chunk table per micro-batch layout (shared by every layer, no device-to-host synchronisation), launch
 counts, and the bit-identical tape / recompute backward that ``configure`` switches.  Needs a CUDA device; the kernel
-tests need Blackwell (SM100a / SM103a) and skip elsewhere.
+tests need SM100a / SM103a / SM107a and skip elsewhere.
 """
 
 import argparse
@@ -85,7 +85,7 @@ def _require_blackwell():
     from miles_ext_kernels.gdn import SUPPORTED_CAPABILITIES
 
     if torch.cuda.get_device_capability() not in SUPPORTED_CAPABILITIES:
-        pytest.skip("the deterministic GDN kernels need SM100a / SM103a")
+        pytest.skip("the deterministic GDN kernels need SM100a / SM103a / SM107a")
     pytest.importorskip("fla.ops.gated_delta_rule")
 
 
@@ -751,22 +751,26 @@ def test_segment_len_override_is_validated_at_plan_time(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# per-architecture stage selection (dqkwg, wy_bwd, wy_bwd_bf16; the WY pullback is the tcgen05 kernel on both Blackwell parts)
+# per-architecture stage selection (dqkwg, wy_bwd, wy_bwd_bf16; the WY pullback is the tcgen05 kernel everywhere)
 
 PER_ARCH_STAGES = {
-    # stage: {arch: (schedule the registry names, block)}; the eight-warp dqkwg is selected on SM103a only, the
-    # tcgen05 + swapAB WY pullback on SM100a and SM103a
-    "dqkwg": {"sm_100a": ("gdn_chunk_bwd_dqkwg", 128), "sm_103a": ("gdn_chunk_bwd_dqkwg_w8", 256)},
-    "wy_bwd": {"sm_100a": ("gdn_chunk_bwd_wy_tc", 256), "sm_103a": ("gdn_chunk_bwd_wy_tc", 256)},
-    "wy_bwd_bf16": {"sm_100a": ("gdn_chunk_bwd_wy_bf16_tc", 256), "sm_103a": ("gdn_chunk_bwd_wy_bf16_tc", 256)},
+    # stage: {arch: (schedule the registry names, block)}; the eight-warp dqkwg is selected on SM103a and on SM107a,
+    # which compiles the SM103a records, the tcgen05 + swapAB WY pullback on all three
+    "dqkwg": {
+        "sm_100a": ("gdn_chunk_bwd_dqkwg", 128),
+        "sm_103a": ("gdn_chunk_bwd_dqkwg_w8", 256),
+        "sm_107a": ("gdn_chunk_bwd_dqkwg_w8", 256),
+    },
+    "wy_bwd": {arch: ("gdn_chunk_bwd_wy_tc", 256) for arch in ("sm_100a", "sm_103a", "sm_107a")},
+    "wy_bwd_bf16": {arch: ("gdn_chunk_bwd_wy_bf16_tc", 256) for arch in ("sm_100a", "sm_103a", "sm_107a")},
 }
 
 
 def test_per_arch_stages_launch_the_kernel_selected_for_this_architecture():
     """``dqkwg`` / ``wy_bwd`` / ``wy_bwd_bf16`` are the stages whose kernel is selected per architecture: the registry
     the host loads names the schedule it was rendered from and carries that kernel's block / dynamic shared
-    memory, and ``kernel()`` launches exactly that record on the current device (eight-warp dqkwg on SM103a only,
-    tcgen05 WY pullback on both Blackwell parts)."""
+    memory, and ``kernel()`` launches exactly that record on the current device (eight-warp dqkwg on SM103a and
+    SM107a, tcgen05 WY pullback everywhere)."""
     _require_blackwell()
     arch = ops.device_arch(DEVICE)
     for stage, per_arch in PER_ARCH_STAGES.items():
