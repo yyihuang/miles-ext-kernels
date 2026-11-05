@@ -4,7 +4,8 @@ miles' GDN output norm: ``x`` the recurrence output ``[T, H, 128]``, the gate ``
 projection, at H = 12 / 16 / 32 / 48 local value heads and small, irregular and ~32k token counts. ``y``, ``dx`` and
 ``dz`` within one BF16 ulp of FP64; the weight gradient within the deterministic package's bound; ``det`` bitwise run
 to run; ``fast`` with ``y``, ``dx`` and ``dz`` bitwise ``det``'s; non-reentrant checkpointing and gradient
-accumulation; ``fast`` runs ``det`` under torch's deterministic algorithms. Needs SM100a / SM103a; skips elsewhere.
+accumulation; ``fast`` runs ``det`` under torch's deterministic algorithms. Needs SM100a / SM103a / SM107a; skips
+elsewhere.
 """
 
 import argparse
@@ -18,11 +19,11 @@ if not torch.cuda.is_available():
 
 from torch.utils.checkpoint import checkpoint  # noqa: E402
 
-from miles_ext_kernels import _variant  # noqa: E402
+from miles_ext_kernels import _variant, cake_native  # noqa: E402
 from miles_ext_kernels.gated_rmsnorm import arguments, ops  # noqa: E402
 
 if tuple(torch.cuda.get_device_capability()) not in ops.SUPPORTED_CAPABILITIES:
-    pytest.skip("the Cake gated RMSNorm kernels need SM100a / SM103a", allow_module_level=True)
+    pytest.skip("the Cake gated RMSNorm kernels need SM100a / SM103a / SM107a", allow_module_level=True)
 
 D = 128
 EPS = 1e-6
@@ -202,6 +203,16 @@ def test_unsupported_norms_are_rejected(kwargs, match):
 
 def test_the_gdn_norm_is_supported():
     ops.check_supported(128, "silu", torch.bfloat16)
+
+
+def test_the_device_needs_its_architectures_toolkit(monkeypatch):
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device=None: (9, 0))
+    with pytest.raises(ValueError, match=r"SM100a / SM103a / SM107a"):
+        ops.check_supported(128, "silu", torch.bfloat16)
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device=None: (10, 7))
+    monkeypatch.setattr(cake_native, "MIN_CUDA", {**cake_native.MIN_CUDA, "sm_107a": (99, 0)})
+    with pytest.raises(RuntimeError, match=r"gated RMSNorm kernels for sm_107a needs CUDA 99\.0 or newer"):
+        ops.check_supported(128, "silu", torch.bfloat16)
 
 
 @pytest.mark.parametrize("variant", ["det", "fast"])

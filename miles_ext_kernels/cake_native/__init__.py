@@ -28,6 +28,12 @@ file lock into a temporary file and renames it into place, the others wait and l
 A waiting rank logs every 30 s and fails after 30 minutes. On a filesystem whose locks are cluster-wide (Lustre), the
 lock of a holder killed on another node can stay held for minutes after it died.
 
+:data:`ARCH_BY_CAPABILITY` names the architecture of every compute capability the packages serve, and :data:`MIN_CUDA`
+the oldest toolkit whose nvcc compiles it: SM107a needs CUDA 13.4 (nvcc 13.0 to 13.3 reject ``compute_107a``), so a
+CUDA 13.0 toolkit builds the SM100a and SM103a libraries only. Every library build checks it, whatever ``min_cuda``
+its manifest entry records, and raises naming the toolkit the architecture needs; :func:`check_toolkit` runs the same
+check ahead of a build.
+
 Importing this module does not import torch or tvm_ffi.
 """
 
@@ -51,7 +57,23 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, NamedTuple
 
-__all__ = ["CudaVersion", "JitSpec", "cache_dir", "find_nvcc", "get_cuda_version", "install", "prebuild"]
+__all__ = [
+    "ARCH_BY_CAPABILITY",
+    "MIN_CUDA",
+    "CudaVersion",
+    "JitSpec",
+    "cache_dir",
+    "check_toolkit",
+    "find_nvcc",
+    "get_cuda_version",
+    "install",
+    "prebuild",
+]
+
+# The architecture of every compute capability the vendored packages serve.
+ARCH_BY_CAPABILITY = {(10, 0): "sm_100a", (10, 3): "sm_103a", (10, 7): "sm_107a"}
+# The oldest CUDA toolkit whose nvcc compiles each architecture.
+MIN_CUDA = {"sm_100a": (12, 8), "sm_103a": (12, 9), "sm_107a": (13, 4)}
 
 _CUDA_CONSTRAINT = re.compile(r"(==|>=)([0-9]+)\.([0-9]+)")
 _NVCC_RELEASE = re.compile(r"release (\d+)\.(\d+)")
@@ -106,8 +128,8 @@ def _nvcc_version(nvcc: str, stamp: tuple[int, int]) -> CudaVersion:
     return CudaVersion(int(release.group(1)), int(release.group(2)), build.group(1))
 
 
-def _toolkit() -> tuple[str, CudaVersion]:
-    nvcc = find_nvcc()
+def _toolkit(nvcc: str | None = None) -> tuple[str, CudaVersion]:
+    nvcc = nvcc or find_nvcc()
     try:
         stat = os.stat(nvcc)
     except OSError as exc:
@@ -118,6 +140,26 @@ def _toolkit() -> tuple[str, CudaVersion]:
 def get_cuda_version() -> CudaVersion:
     """The toolkit of :func:`find_nvcc` (``.major``, ``.minor`` as ``cake_build`` reads them, and ``.full``)."""
     return _toolkit()[1]
+
+
+def _check_arch(arch: str, what: str, nvcc: str, cuda: CudaVersion) -> None:
+    need = MIN_CUDA.get(arch)
+    if need is not None and (cuda.major, cuda.minor) < need:
+        raise RuntimeError(
+            f"compiling {what} for {arch} needs CUDA {need[0]}.{need[1]} or newer, but {nvcc} is CUDA {cuda.full}: "
+            f"set CUDA_HOME to a CUDA {need[0]}.{need[1]} or newer toolkit"
+        )
+
+
+def check_toolkit(arch: str, what: str, nvcc: str | None = None) -> CudaVersion:
+    """The toolkit of ``nvcc`` (default: :func:`find_nvcc`), checked to compile ``arch`` (:data:`MIN_CUDA`).
+
+    ``RuntimeError`` naming the CUDA version ``arch`` needs when the toolkit is older; ``what`` names the kernels in
+    the message.
+    """
+    nvcc, cuda = _toolkit(nvcc)
+    _check_arch(arch, what, nvcc, cuda)
+    return cuda
 
 
 def _conditional_flags(items: Iterable[dict[str, Any]], cuda: tuple[int, int]) -> list[str]:
@@ -283,6 +325,7 @@ def install(cake_build_module: ModuleType) -> ModuleType:
         name: str,
         sources: list[Path],
         *,
+        arch: str,
         extra_cuda_cflags: list[str],
         extra_ldflags: list[str],
         extra_include_paths: list[Path],
@@ -291,6 +334,7 @@ def install(cake_build_module: ModuleType) -> ModuleType:
         if use_fast_math:
             raise ValueError(f"{name}: use_fast_math must come from the manifest's flags")
         nvcc, cuda = _toolkit()
+        _check_arch(arch, name, nvcc, cuda)
         common = cake_build_module.manifest()["common"]
         return JitSpec(
             package,
@@ -308,7 +352,9 @@ def install(cake_build_module: ModuleType) -> ModuleType:
         )
 
     def _jit_toolchain(name: str) -> tuple[Any, Any]:
-        return gen_jit_spec, get_cuda_version
+        # the entry's architecture, checked against MIN_CUDA when the library is built
+        arch = cake_build_module.libraries_by_name()[name]["arch"]
+        return functools.partial(gen_jit_spec, arch=arch), get_cuda_version
 
     cake_build_module._jit_toolchain = _jit_toolchain
     return cake_build_module
@@ -318,7 +364,8 @@ def prebuild(cake_build_module: ModuleType, names: Iterable[str], max_workers: i
     """Compile the libraries ``names`` of a vendored package ahead of their first call, ``max_workers`` at a time.
 
     Installs this loader on the package. Libraries prebuilt under ``aot/`` are skipped; a library whose ``min_cuda``
-    exceeds the toolkit raises, as loading it would. Returns the paths of the libraries in the cache.
+    or whose architecture's :data:`MIN_CUDA` exceeds the toolkit raises, as loading it would. Returns the paths of the
+    libraries in the cache.
     """
     install(cake_build_module)
     pending = [name for name in dict.fromkeys(names) if not cake_build_module.prebuilt_path(name).is_file()]

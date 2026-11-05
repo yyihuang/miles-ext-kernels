@@ -3,7 +3,7 @@ Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
 Licensed under the Apache License, Version 2.0.
 https://www.apache.org/licenses/LICENSE-2.0
 
-SiLU-gated RMSNorm on the vendored Cake kernels (SM100a / SM103a).
+SiLU-gated RMSNorm on the vendored Cake kernels (SM100a / SM103a / SM107a).
 
 :func:`rmsnorm_silu_gate` is the output norm of miles' GDN layers: per row of 128 of BF16 ``x`` and of the gate ``z``
 (``[T, H, 128]`` or ``[T * H, 128]``, each with its own token and head strides) and a BF16 ``weight`` ``[128]``
@@ -21,7 +21,7 @@ within ``det``'s bound ``|dw| * 2^-7 + sum|terms| * 2^-20``. ``fast`` serves eve
 ``det``, with a one-time warning, only while ``torch.use_deterministic_algorithms(True)`` is in effect.
 
 The vendored packages compile their libraries on first use through :mod:`miles_ext_kernels.cake_native`;
-:func:`prebuild` builds them before a layer's first step.
+:func:`prebuild` builds them before a layer's first step. SM107a needs a CUDA 13.4 or newer toolkit.
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ from miles_ext_kernels._variant import VARIANTS, warn_det_fallback
 
 __all__ = ["SUPPORTED_CAPABILITIES", "check_supported", "prebuild", "rmsnorm_silu_gate"]
 
-SUPPORTED_CAPABILITIES = ((10, 0), (10, 3))
+SUPPORTED_CAPABILITIES = tuple(cake_native.ARCH_BY_CAPABILITY)
 HEAD_DIM = 128
 # Set by ``miles_ext_kernels.gated_rmsnorm.configure`` (--cake-gated-rmsnorm-variant) and read at call time.
 VARIANT = "fast"
@@ -71,15 +71,17 @@ def _resolve_variant(variant: str | None) -> str:
 
 
 def _capability(device) -> tuple[int, int]:
-    """The compute capability of ``device`` (default: the current CUDA device), checked to be supported."""
+    """The compute capability of ``device`` (default: the current CUDA device), checked to be supported and its
+    kernels to build with the toolkit."""
     if not torch.cuda.is_available():
         raise ValueError(f"{_BACKEND} needs a CUDA device of compute capability {SUPPORTED_CAPABILITIES}")
     capability = tuple(torch.cuda.get_device_capability(device))
     if capability not in SUPPORTED_CAPABILITIES:
         raise ValueError(
-            f"{_BACKEND} runs on compute capability {SUPPORTED_CAPABILITIES} (SM100a / SM103a), "
+            f"{_BACKEND} runs on compute capability {SUPPORTED_CAPABILITIES} (SM100a / SM103a / SM107a), "
             f"not {capability}; use --linear-attention-output-norm-backend fla"
         )
+    cake_native.check_toolkit(cake_native.ARCH_BY_CAPABILITY[capability], "the Cake gated RMSNorm kernels")
     return capability
 
 
@@ -87,7 +89,8 @@ def check_supported(
     head_dim: int, activation: str, weight_dtype: torch.dtype, *, has_bias: bool = False, device=None
 ) -> None:
     """Raise ``ValueError`` unless the Cake kernels run this gated output norm on ``device`` (default: the current
-    CUDA device): a SiLU gate, rows of 128, a BF16 weight without bias, compute capability 10.0 or 10.3."""
+    CUDA device): a SiLU gate, rows of 128, a BF16 weight without bias, compute capability 10.0, 10.3 or 10.7;
+    ``RuntimeError`` when the toolkit cannot build the device's kernels (SM107a needs CUDA 13.4 or newer)."""
     if activation != "silu":
         raise ValueError(
             f"{_BACKEND} computes RMSNorm(x) * w * SiLU(z), but this model gates its output norm with "

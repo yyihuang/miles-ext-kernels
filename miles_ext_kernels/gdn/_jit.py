@@ -3,16 +3,18 @@ Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
 Licensed under the Apache License, Version 2.0.
 https://www.apache.org/licenses/LICENSE-2.0
 
-Native loading for the generated deterministic chunked GDN training kernels (SM100a / SM103a).
+Native loading for the generated deterministic chunked GDN training kernels (SM100a / SM103a / SM107a).
 
 ``registry.json`` next to this file is written mechanically by the kernel generator: one record per
 stage with the argument plan, launch block, dynamic shared memory, the device/launcher source pair
 under ``csrc/`` and the compile flags. The generated device code is the same text for SM100a and
 SM103a (``__CUDA_ARCH__`` guards where they differ), so one source pair serves both architectures
 (``arches``); a stage exported with a different schedule per architecture carries its pairs under
-``per_arch`` (``dqkwg``: eight warps on SM103a). Each stage builds on first use as a torch CUDA
-extension for the current device's architecture (``nvcc`` + ``ninja``; cached per architecture under
-``TORCH_EXTENSIONS_DIR``).
+``per_arch`` (``dqkwg``: eight warps on SM103a). SM107a has no export of its own: it compiles the
+SM103a records (:data:`EXPORT_ARCH`), whose device code takes the same non-SM100a paths there, for
+``compute_107a``. Each stage builds on first use as a torch CUDA extension for the current device's
+architecture (``nvcc`` + ``ninja``; cached per architecture under ``TORCH_EXTENSIONS_DIR``); SM107a
+needs a CUDA 13.4 or newer nvcc (``miles_ext_kernels.cake_native.MIN_CUDA``).
 """
 
 import json
@@ -22,13 +24,18 @@ from pathlib import Path
 
 import torch
 
+from .. import cake_native
+
 _PACKAGE = Path(__file__).resolve().parent
 _CSRC = _PACKAGE / "csrc"
 _ARCH_FLAGS = {
     "sm_100a": "-gencode=arch=compute_100a,code=sm_100a",
     "sm_103a": "-gencode=arch=compute_103a,code=sm_103a",
+    "sm_107a": "-gencode=arch=compute_107a,code=sm_107a",
 }
-SUPPORTED_CAPABILITIES = {(10, 0): "sm_100a", (10, 3): "sm_103a"}
+SUPPORTED_CAPABILITIES = {(10, 0): "sm_100a", (10, 3): "sm_103a", (10, 7): "sm_107a"}
+# architecture -> the exported architecture whose records it compiles
+EXPORT_ARCH = {"sm_107a": "sm_103a"}
 # torch's extension build disables the half / bf16 conversion operators; the generated device code uses them.
 _CONVERSION_FLAGS = (
     "-U__CUDA_NO_HALF_OPERATORS__",
@@ -49,11 +56,15 @@ def _load_registry() -> dict:
         per_arch = record.pop("per_arch", None)
         for arch in record["arches"]:
             modules.setdefault(stage, {})[arch] = record if per_arch is None else {**record, **per_arch[arch]}
+    for records in modules.values():
+        for arch, exported in EXPORT_ARCH.items():
+            if exported in records:
+                records.setdefault(arch, records[exported])
     return modules
 
 
 # MODULES[stage][arch] -> generated module record (from registry.json); a stage exported once for every
-# architecture shares one record object across them.
+# architecture shares one record object across them, and an EXPORT_ARCH architecture the record of its export.
 MODULES = _load_registry()
 
 
@@ -64,8 +75,16 @@ def device_arch(device=None):
         return SUPPORTED_CAPABILITIES[capability]
     except KeyError:
         raise NotImplementedError(
-            f"the deterministic chunked GDN training kernels require SM100a or SM103a, got {capability}"
+            f"the deterministic chunked GDN training kernels require SM100a, SM103a or SM107a, got {capability}"
         ) from None
+
+
+def _check_toolkit(arch):
+    """Raise ``RuntimeError`` unless the nvcc of torch's extension builds compiles ``arch`` (SM107a: CUDA 13.4)."""
+    from torch.utils.cpp_extension import CUDA_HOME
+
+    nvcc = None if CUDA_HOME is None else str(Path(CUDA_HOME) / "bin" / "nvcc")
+    cake_native.check_toolkit(arch, "the deterministic chunked GDN training kernels", nvcc)
 
 
 @cache
@@ -74,6 +93,7 @@ def load(stage, arch):
     from torch.utils.cpp_extension import load as load_extension
 
     record = MODULES[stage][arch]
+    _check_toolkit(arch)
     return load_extension(
         name=f"{record['name']}_{arch}",
         sources=[str(_CSRC / relative) for relative in record["sources"]],
