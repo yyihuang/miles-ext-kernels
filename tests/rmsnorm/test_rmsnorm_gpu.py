@@ -5,7 +5,8 @@ kernels serve) and small, irregular and 16k-32k token counts, ``weight`` the w o
 and ``dx`` at FlashInfer's tolerance; the FP32 weight gradient within its budget (rel-L2 <= 1e-4, elementwise
 atol = rtol = 1e-4), a BF16 one widened by its rounding; ``det`` bitwise run to run; ``fast`` with ``y`` bitwise
 ``det``'s, ``dx`` reproducible and within one BF16 ulp of ``det``'s; unsupported hidden sizes refused at
-construction; ``fast`` runs ``det`` under torch's deterministic algorithms. Needs SM100a / SM103a; skips elsewhere.
+construction; ``fast`` runs ``det`` under torch's deterministic algorithms. Needs SM100a / SM103a / SM107a; skips
+elsewhere.
 """
 
 import argparse
@@ -19,11 +20,11 @@ if not torch.cuda.is_available():
 
 from torch.utils.checkpoint import checkpoint  # noqa: E402
 
-from miles_ext_kernels import _variant  # noqa: E402
+from miles_ext_kernels import _variant, cake_native  # noqa: E402
 from miles_ext_kernels.rmsnorm import ZeroCenteredRMSNorm, arguments, ops  # noqa: E402
 
 if tuple(torch.cuda.get_device_capability()) not in ops.SUPPORTED_CAPABILITIES:
-    pytest.skip("the Cake RMSNorm kernels need SM100a / SM103a", allow_module_level=True)
+    pytest.skip("the Cake RMSNorm kernels need SM100a / SM103a / SM107a", allow_module_level=True)
 
 EPS = 1e-6
 DEVICE = torch.device("cuda", torch.cuda.current_device())
@@ -152,9 +153,19 @@ def test_unsupported_hidden_sizes_are_refused_at_construction(hidden):
 
 
 def test_the_supported_hidden_sizes_include_the_gdn_widths():
-    arch = {(10, 0): "sm_100a", (10, 3): "sm_103a"}[tuple(torch.cuda.get_device_capability())]
+    arch = cake_native.ARCH_BY_CAPABILITY[tuple(torch.cuda.get_device_capability())]
     assert set(HIDDEN_SIZES) <= set(ops.supported_hidden_sizes(arch))
     assert not {1024, 2560} & set(ops.supported_hidden_sizes(arch))
+
+
+def test_the_device_needs_its_architectures_toolkit(monkeypatch):
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device=None: (9, 0))
+    with pytest.raises(ValueError, match=r"SM100a / SM103a / SM107a"):
+        ops.check_supported(2048)
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device=None: (10, 7))
+    monkeypatch.setattr(cake_native, "MIN_CUDA", {**cake_native.MIN_CUDA, "sm_107a": (99, 0)})
+    with pytest.raises(RuntimeError, match=r"RMSNorm kernels for sm_107a needs CUDA 99\.0 or newer"):
+        ops.check_supported(2048)
 
 
 @pytest.mark.parametrize("variant", ["det", "fast"])

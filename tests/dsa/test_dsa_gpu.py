@@ -1,4 +1,4 @@
-"""The DSA kernels on Blackwell (SM100a / SM103a) at the TP-local shapes miles runs.
+"""The DSA kernels on SM100a / SM103a / SM107a at the TP-local shapes miles runs.
 
 * det sparse attention -- GLM-5 / DeepSeek-V3.2 ``thd`` MLA (``d_qk = 512 + 64``, no sink) at 8 / 16 / 32 / 64 heads,
   DeepSeek-V4 ``bshd`` MQA (``d = 512``, FP32 sink) at 16 / 64 heads, and the V4 window + compressed rows (128 + 512 /
@@ -16,10 +16,10 @@ import math
 import pytest
 
 torch = pytest.importorskip("torch")
-if not torch.cuda.is_available() or torch.cuda.get_device_capability() not in {(10, 0), (10, 3)}:
-    pytest.skip("the DSA kernels target SM100a / SM103a", allow_module_level=True)
+if not torch.cuda.is_available() or torch.cuda.get_device_capability() not in {(10, 0), (10, 3), (10, 7)}:
+    pytest.skip("the DSA kernels target SM100a / SM103a / SM107a", allow_module_level=True)
 
-from miles_ext_kernels import _variant  # noqa: E402
+from miles_ext_kernels import _variant, cake_native  # noqa: E402
 from miles_ext_kernels.dsa import configure, ops  # noqa: E402
 
 DEVICE = "cuda"
@@ -456,5 +456,15 @@ def test_prebuild_warms_both_variants_for_a_served_geometry():
 
 
 def test_check_device_names_the_architecture():
-    assert ops.check_device() == {(10, 0): "sm_100a", (10, 3): "sm_103a"}[torch.cuda.get_device_capability()]
+    assert ops.check_device() == cake_native.ARCH_BY_CAPABILITY[torch.cuda.get_device_capability()]
+
+
+def test_check_device_needs_the_architectures_toolkit(monkeypatch):
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device=None: (9, 0))
+    with pytest.raises(NotImplementedError, match="SM100a, SM103a or SM107a"):
+        ops.check_device()
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device=None: (10, 7))
+    monkeypatch.setattr(cake_native, "MIN_CUDA", {**cake_native.MIN_CUDA, "sm_107a": (99, 0)})
+    with pytest.raises(RuntimeError, match=r"DSA training kernels for sm_107a needs CUDA 99\.0 or newer"):
+        ops.check_device()
     assert math.isclose(ops.LOG2E, math.log2(math.e))

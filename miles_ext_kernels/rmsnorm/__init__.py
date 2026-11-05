@@ -3,7 +3,7 @@ Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
 Licensed under the Apache License, Version 2.0.
 https://www.apache.org/licenses/LICENSE-2.0
 
-Fused zero-centred RMSNorm training kernels for Blackwell (SM100a / SM103a): ``x * rstd * (1 + w)``, the input
+Fused zero-centred RMSNorm training kernels for SM100a / SM103a / SM107a: ``x * rstd * (1 + w)``, the input
 layernorm of miles' GDN linear-attention layers.
 
 :class:`ZeroCenteredRMSNorm` holds the single ``weight`` parameter (w of the ``(1 + w)`` scale, as Transformer

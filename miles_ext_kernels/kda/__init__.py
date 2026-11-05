@@ -3,7 +3,7 @@ Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
 Licensed under the Apache License, Version 2.0.
 https://www.apache.org/licenses/LICENSE-2.0
 
-Deterministic packed KDA (Kimi Delta Attention) chunked training kernels for Blackwell (SM100a / SM103a).
+Deterministic packed KDA (Kimi Delta Attention) chunked training kernels for SM100a / SM103a / SM107a.
 
 FlashInfer's Cake package ``cake_kda_det_train``, vendored under ``_vendor/``: forward and backward of the chunked
 KDA recurrence (chunk 64, K = V = 128, 1 to 64 heads, per-document zero initial state) over one packed batch of
