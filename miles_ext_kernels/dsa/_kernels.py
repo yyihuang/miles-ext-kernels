@@ -30,7 +30,7 @@ ATTENTION_D_ROPE = 64  # the MLA rope tail width (d_tail 64)
 # architectures; every other head count runs the register-MMA forward stages.  ``ATTENTION_TC = False`` (tests only)
 # forces the register-MMA forward everywhere.
 ATTENTION_TC_HEADS = (8, 16, 32, 64)
-ATTENTION_TC_ARCHES = ("sm_100a", "sm_103a")
+ATTENTION_TC_ARCHES = ("sm_100a", "sm_103a", "sm_107a")
 # The tcgen05 backward rows stages ``dsa_attention_bwd_tc_h{H}_d512t{d_tail}`` (one CTA per query row holding all of the
 # row's heads; the key-side dKV is accumulated over the heads in tensor memory and written as ONE FP32 partial per
 # (row, slot) for the sorted segmented reducer) exist for rows with exactly 64 heads (the generator's ``dsa_h64_bwd``

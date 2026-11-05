@@ -3,7 +3,7 @@ Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
 Licensed under the Apache License, Version 2.0.
 https://www.apache.org/licenses/LICENSE-2.0
 
-DSA (DeepSeek Sparse Attention) training kernels for Blackwell (SM100a / SM103a).
+DSA (DeepSeek Sparse Attention) training kernels for SM100a / SM103a / SM107a.
 
 One path for the GLM-5 / DeepSeek-V3.2 / GLM-5.3 (``thd``, absorbed MLA, no sink) and DeepSeek-V4 / V4.1 (``bshd``,
 MQA, batched, compressed KV, FP32 attention sink) lightning indexer and sparse attention, forward and backward:
