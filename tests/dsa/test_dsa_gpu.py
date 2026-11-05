@@ -457,6 +457,7 @@ def test_prebuild_warms_both_variants_for_a_served_geometry():
 
 def test_check_device_names_the_architecture():
     assert ops.check_device() == cake_native.ARCH_BY_CAPABILITY[torch.cuda.get_device_capability()]
+    assert math.isclose(ops.LOG2E, math.log2(math.e))
 
 
 def test_check_device_needs_the_architectures_toolkit(monkeypatch):
@@ -467,4 +468,3 @@ def test_check_device_needs_the_architectures_toolkit(monkeypatch):
     monkeypatch.setattr(cake_native, "MIN_CUDA", {**cake_native.MIN_CUDA, "sm_107a": (99, 0)})
     with pytest.raises(RuntimeError, match=r"DSA training kernels for sm_107a needs CUDA 99\.0 or newer"):
         ops.check_device()
-    assert math.isclose(ops.LOG2E, math.log2(math.e))
