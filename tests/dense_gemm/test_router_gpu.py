@@ -1,7 +1,7 @@
 """The FP32 router gate GEMM (``dense_gemm.router_gating``) against FP64: logits from the BF16 operands (K1), input and
 weight gradients in FP32 (K2) rounded to BF16, the top-k routing, and bit-identical reruns, for the expert counts and
 hidden sizes of miles' MoE models at an odd token count. Then the vendored package's own router cases and the prebuild
-hook. Needs a CUDA device; the tests need SM100a / SM103a and skip elsewhere.
+hook. Needs a CUDA device; the tests need SM100a / SM103a / SM107a and skip elsewhere.
 """
 
 import pytest
@@ -10,10 +10,11 @@ torch = pytest.importorskip("torch")
 if not torch.cuda.is_available():
     pytest.skip("CUDA device required", allow_module_level=True)
 
+from miles_ext_kernels import cake_native  # noqa: E402
 from miles_ext_kernels.dense_gemm import SUPPORTED_CAPABILITIES, ops, prebuild_router, router_gating  # noqa: E402
 
 if torch.cuda.get_device_capability() not in SUPPORTED_CAPABILITIES:
-    pytest.skip("the Cake dense projection GEMMs need SM100a / SM103a", allow_module_level=True)
+    pytest.skip("the Cake dense projection GEMMs need SM100a / SM103a / SM107a", allow_module_level=True)
 
 SEED = 20260930
 EXPERTS = (128, 256, 288, 384, 512)
@@ -115,6 +116,20 @@ def test_router_refuses_what_the_programs_do_not_take():
         router_gating(x, torch.empty(260, 4096, dtype=torch.bfloat16, device="cuda"))
     with pytest.raises(ValueError, match="weight \\[E, H\\]"):
         router_gating(x, torch.empty(256, 2048, dtype=torch.bfloat16, device="cuda"))
+
+
+def test_the_device_needs_its_architectures_toolkit(monkeypatch):
+    ops._arch_of.cache_clear()  # the architecture of a device index is cached once checked
+    try:
+        monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device=None: (9, 0))
+        with pytest.raises(RuntimeError, match="SM100a / SM103a / SM107a"):
+            ops._arch()
+        monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device=None: (10, 7))
+        monkeypatch.setattr(cake_native, "MIN_CUDA", {**cake_native.MIN_CUDA, "sm_107a": (99, 0)})
+        with pytest.raises(RuntimeError, match=r"projection GEMMs for sm_107a needs CUDA 99\.0 or newer"):
+            ops._arch()
+    finally:
+        ops._arch_of.cache_clear()
 
 
 def test_prebuild_compiles_every_program_the_router_launches():
