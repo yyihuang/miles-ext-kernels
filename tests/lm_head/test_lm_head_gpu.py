@@ -1,6 +1,6 @@
 """The Cake LM-head log-probabilities (``det`` and ``fast``) against a PyTorch reference, at the hidden / vocabulary
 sizes of the models miles trains with ``--log-probs-backend cake`` (TP 1, so the whole vocabulary per GPU). Needs
-Blackwell (SM100a / SM103a); skips elsewhere.
+SM100a / SM103a / SM107a; skips elsewhere.
 
 Accuracy gate (FlashInfer's own, from its chunked LM-head tests): against a high-precision oracle, each error of a
 variant is at most 1.05x the error of the unchunked PyTorch path at the same rounding boundaries (BF16 ``z = X @ W^T``,
@@ -27,11 +27,11 @@ torch = pytest.importorskip("torch")
 if not torch.cuda.is_available():
     pytest.skip("CUDA device required", allow_module_level=True)
 
-from miles_ext_kernels import _variant  # noqa: E402
+from miles_ext_kernels import _variant, cake_native  # noqa: E402
 from miles_ext_kernels.lm_head import ops  # noqa: E402
 
 if torch.cuda.get_device_capability() not in ops.SUPPORTED_CAPABILITIES:
-    pytest.skip("the Cake LM-head kernels need SM100a / SM103a", allow_module_level=True)
+    pytest.skip("the Cake LM-head kernels need SM100a / SM103a / SM107a", allow_module_level=True)
 
 CUDA = torch.device("cuda")
 IGNORE_INDEX = -100
@@ -460,9 +460,17 @@ def test_an_unsupported_device_is_a_clear_error(monkeypatch):
         ops.log_probs(p.X.cpu(), p.W[:256].cpu(), p.labels.cpu())
 
     monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device=None: (9, 0))
-    with pytest.raises(RuntimeError, match=r"need compute capability 10\.0 .* or 10\.3 .*; cuda:\d+ has 9\.0"):
+    unsupported = r"need compute capability 10\.0 .*, 10\.3 .* or 10\.7 .*; cuda:\d+ has 9\.0"
+    with pytest.raises(RuntimeError, match=unsupported):
         ops.log_probs(p.X, p.W, p.labels)
     with pytest.raises(RuntimeError, match="need compute capability"):
+        ops.prebuild()
+
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device=None: (10, 7))
+    monkeypatch.setattr(cake_native, "MIN_CUDA", {**cake_native.MIN_CUDA, "sm_107a": (99, 0)})
+    with pytest.raises(RuntimeError, match=r"LM-head kernels for sm_107a needs CUDA 99\.0 or newer"):
+        ops.log_probs(p.X, p.W, p.labels)
+    with pytest.raises(RuntimeError, match=r"LM-head kernels for sm_107a needs CUDA 99\.0 or newer"):
         ops.prebuild()
 
 

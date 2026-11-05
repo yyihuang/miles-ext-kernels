@@ -3,7 +3,8 @@ Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
 Licensed under the Apache License, Version 2.0.
 https://www.apache.org/licenses/LICENSE-2.0
 
-Selected-token log-probabilities of an LM head on the vendored Cake chunked LM-head kernels (SM100a / SM103a).
+Selected-token log-probabilities of an LM head on the vendored Cake chunked LM-head kernels (SM100a / SM103a /
+SM107a; SM107a builds them with a CUDA 13.4 or newer toolkit).
 
 ``logp_t = z[t, y_t] / tau_t - logsumexp_v(z[t, v] / tau_t)`` with ``z = bf16(X @ W^T)``, computed chunk by chunk:
 the forward keeps the FP32 log-sum-exp per row, the backward recomputes each chunk's logits and forms ``dX`` and
@@ -40,7 +41,7 @@ from miles_ext_kernels._variant import VARIANTS, warn_det_fallback
 __all__ = ["CHUNK_SIZE", "SUPPORTED_CAPABILITIES", "VARIANT", "device_arch", "log_probs", "prebuild"]
 
 # compute capability -> the architecture of the vendored programs this package runs
-SUPPORTED_CAPABILITIES = {(10, 0): "sm_100a", (10, 3): "sm_103a"}
+SUPPORTED_CAPABILITIES = dict(cake_native.ARCH_BY_CAPABILITY)
 # The defaults of a call that names neither, read at call time: miles_ext_kernels.lm_head.configure sets them from
 # --cake-lm-head-variant / --cake-lm-head-chunk-size.
 VARIANT = "fast"
@@ -72,7 +73,8 @@ def _package(variant: str) -> _Package:
 
 
 def device_arch(device: torch.device | int | str | None = None) -> str:
-    """The architecture tag of ``device`` (default: the current CUDA device); raises where the kernels do not run."""
+    """The architecture tag of ``device`` (default: the current CUDA device); raises where the kernels do not run or
+    the toolkit cannot build them (SM107a needs CUDA 13.4 or newer)."""
     device = torch.device("cuda", torch.cuda.current_device()) if device is None else torch.device(device)
     if device.type != "cuda":
         raise RuntimeError(f"the Cake LM-head kernels run on a CUDA device, got {device}")
@@ -80,9 +82,10 @@ def device_arch(device: torch.device | int | str | None = None) -> str:
     arch = SUPPORTED_CAPABILITIES.get((major, minor))
     if arch is None:
         raise RuntimeError(
-            "the Cake LM-head kernels need compute capability 10.0 (B200 / GB200) or 10.3 (B300 / GB300); "
-            f"{device} has {major}.{minor}"
+            "the Cake LM-head kernels need compute capability 10.0 (B200 / GB200), 10.3 (B300 / GB300) or 10.7 "
+            f"(R200); {device} has {major}.{minor}"
         )
+    cake_native.check_toolkit(arch, "the Cake LM-head kernels")
     return arch
 
 
@@ -125,8 +128,9 @@ def log_probs(
             spares the device-to-host read of the count. It is checked on the device: a wrong count stops the stream
             with a device-side assertion. Bitwise the same outputs as without it.
 
-    Raises ``RuntimeError`` off SM100a / SM103a and ``ValueError`` for shapes, dtypes or values the kernels do not
-    serve. A call of ``T == 0`` rows returns an empty ``logp`` (zero ``dW``).
+    Raises ``RuntimeError`` off SM100a / SM103a / SM107a, or when the toolkit cannot build the device's kernels, and
+    ``ValueError`` for shapes, dtypes or values the kernels do not serve. A call of ``T == 0`` rows returns an empty
+    ``logp`` (zero ``dW``).
     """
     device_arch(X.device)
     variant = _runs(variant, warn=True)

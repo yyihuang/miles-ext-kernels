@@ -3,7 +3,7 @@ Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
 Licensed under the Apache License, Version 2.0.
 https://www.apache.org/licenses/LICENSE-2.0
 
-Chunked LM-head selected-token log-probabilities for Blackwell (SM100a / SM103a): the Cake kernels of FlashInfer's
+Chunked LM-head selected-token log-probabilities for SM100a / SM103a / SM107a: the Cake kernels of FlashInfer's
 chunked LM-head training packages, vendored under ``_vendor/``.
 
 :func:`log_probs` takes the hidden rows ``X [T, H]``, the output weight ``W [V, H]`` (both BF16) and the target ids
