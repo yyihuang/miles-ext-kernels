@@ -1,9 +1,9 @@
-"""The Cake mHC kernels (``miles_ext_kernels.mhc``) on Blackwell (SM100a / SM103a).
+"""The Cake mHC kernels (``miles_ext_kernels.mhc``) on SM100a / SM103a / SM107a.
 
 Ported from FlashInfer's backend suites of the three vendored packages (``tests/mhc/test_cake_mhc_det_train.py``,
 ``tests/experimental/test_cake_mhc_train.py``, ``tests/mhc/test_cake_mhc_det_train_head.py``) at every hidden size
-the package accepts (4096, 5120, 7168) and token counts 1, 257, 2049 and 16263, through the autograd entry points
-miles calls:
+the device serves (4096, 5120, 7168; 4096 only on SM107a, where the others are refused) and token counts 1, 257, 2049
+and 16263, through the autograd entry points miles calls:
 
 * ``det``: every output against a pure-torch FP64 reference of the function (autograd through the FP64 forward)
   under FlashInfer's bars -- BF16 ``U``, ``Y``, ``dB``, ``dX``: ``|out - ref| <= 1e-2 + 1e-2 |ref|`` on every element;
@@ -33,13 +33,18 @@ torch = pytest.importorskip("torch")
 if not torch.cuda.is_available():
     pytest.skip("CUDA device required", allow_module_level=True)
 
-from miles_ext_kernels import _variant  # noqa: E402
+from miles_ext_kernels import _variant, cake_native  # noqa: E402
 from miles_ext_kernels.mhc import arguments, ops  # noqa: E402
 
 DEVICE = torch.device("cuda", torch.cuda.current_device())
 CAPABILITY = tuple(torch.cuda.get_device_capability(DEVICE))
 if CAPABILITY not in ops.SUPPORTED_CAPABILITIES:
-    pytest.skip(f"the Cake mHC kernels run SM100a / SM103a, not capability {CAPABILITY}", allow_module_level=True)
+    pytest.skip(
+        f"the Cake mHC kernels run SM100a / SM103a / SM107a, not capability {CAPABILITY}", allow_module_level=True
+    )
+ARCH = cake_native.ARCH_BY_CAPABILITY[CAPABILITY]
+# the hidden sizes the device serves: FlashInfer exports the packages for SM107a at hidden 4096 only
+SERVED = (4096,) if ARCH == "sm_107a" else arguments.HIDDEN_SIZES
 
 BF16, F32, F64 = torch.bfloat16, torch.float32, torch.float64
 STREAMS, MAPPING_ROWS = 4, 24
@@ -50,7 +55,7 @@ FP32_REL_L2_MAX = 1e-5
 FP32_ELEM_REL_MAX = 1e-4
 FP32_UNIT = 2.0**-24
 DFN_ABS_SLACK = 1.02
-CASES = [(hidden, T) for hidden in arguments.HIDDEN_SIZES for T in (1, 257, 2049, 16263)]
+CASES = [(hidden, T) for hidden in SERVED for T in (1, 257, 2049, 16263)]
 BF16_OUTPUTS = ("U", "Y", "dB", "dX")
 PARAMETER_GRADS = ("dfn", "dscale", "dbase")
 
@@ -58,7 +63,7 @@ PARAMETER_GRADS = ("dfn", "dscale", "dbase")
 @pytest.fixture(autouse=True, scope="module")
 def prebuilt():
     """Compile the libraries of both variants and the head first: no test pays for a build mid-call."""
-    for hidden in arguments.HIDDEN_SIZES:
+    for hidden in SERVED:
         for variant in ("det", "fast"):
             ops.prebuild(DEVICE, hidden, variant=variant, head=True)
     yield
@@ -271,6 +276,26 @@ def test_fast_under_torch_deterministic_algorithms_runs_det_and_says_so_once(mon
     assert len(warnings) == 1, [record.getMessage() for record in caplog.records]
 
 
+def test_the_device_serves_its_hidden_sizes_and_refuses_the_others() -> None:
+    assert ops.supported_hidden_sizes(DEVICE) == SERVED
+    for hidden in arguments.HIDDEN_SIZES:
+        assert ops.is_supported(DEVICE, hidden) is (hidden in SERVED)
+        if hidden not in SERVED:
+            for variant in ("det", "fast"):
+                with pytest.raises(ValueError, match=rf"the hidden sizes \(4096,\) on {ARCH}, not {hidden}"):
+                    ops.prebuild(DEVICE, hidden, variant=variant)
+
+
+def test_prebuild_needs_the_architectures_toolkit(monkeypatch) -> None:
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device=None: (9, 0))
+    with pytest.raises(ValueError, match=r"compute capability"):
+        ops.prebuild(DEVICE, 4096, variant="det")
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device=None: (10, 7))
+    monkeypatch.setattr(cake_native, "MIN_CUDA", {**cake_native.MIN_CUDA, "sm_107a": (99, 0)})
+    with pytest.raises(RuntimeError, match=r"mHC kernels for sm_107a needs CUDA 99\.0 or newer"):
+        ops.prebuild(DEVICE, 4096, variant="det")
+
+
 def test_finish_refuses_a_foreign_handle() -> None:
     i = _make_inputs(1, 4096)
 
@@ -278,7 +303,7 @@ def test_finish_refuses_a_foreign_handle() -> None:
         ops.mhc_finish(i["X"], i["B"], object())
 
 
-@pytest.mark.parametrize("hidden", arguments.HIDDEN_SIZES)
+@pytest.mark.parametrize("hidden", SERVED)
 @pytest.mark.parametrize("T", [1, 257, 16263])
 def test_the_head_is_torch_mean_bit_for_bit(hidden: int, T: int) -> None:
     g = torch.Generator(device=DEVICE).manual_seed(SEED)
