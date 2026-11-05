@@ -20,7 +20,7 @@ Under `--use-miles-ext-kernels`, miles calls `miles_ext_kernels.add_arguments(pa
 | package | miles backend switch | arguments | GPUs | tests |
 |---|---|---|---|---|
 | `gdn` (chunked gated delta rule, forward + backward: `det` is the bit-deterministic render, the only variant with context parallelism; `fast` is the vendored Cake non-deterministic package `cake_gdn_train`, fixed-order, so it repeats bit for bit and `--deterministic-mode` allows an explicit `fast`; a `cp_context` call runs `det`) | `--linear-attention-backend cake` | `--cake-gdn-variant {det,fast}`, `--cake-gdn-recompute-state` | SM100a / SM103a / SM107a | `tests/gdn` (CPU; `test_gdn_wiring.py`, `test_fla_parity.py` and `test_gdn_fast_gpu.py` need CUDA) |
-| `kda` (deterministic packed KDA chunked forward + backward: raw forget gate and q/k L2 norm in the kernels, 1-64 heads) | `--kda-backend cake` | none | SM100a / SM103a | `tests/kda` (CPU; `test_kda_gpu.py` needs CUDA, its fla parity rows need fla) |
+| `kda` (deterministic packed KDA chunked forward + backward: raw forget gate and q/k L2 norm in the kernels, 1-64 heads) | `--kda-backend cake` | none | SM100a / SM103a / SM107a | `tests/kda` (CPU; `test_kda_gpu.py` needs CUDA, its fla parity rows need fla) |
 
 A package that ships two variants takes `--cake-<kernel>-variant {det,fast}`: `det` is bit-deterministic, `fast` is
 faster. Unset, it runs `fast`, or `det` under miles' `--deterministic-mode` (`miles_ext_kernels/_variant.py`). The
