@@ -3,14 +3,17 @@ Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
 Licensed under the Apache License, Version 2.0.
 https://www.apache.org/licenses/LICENSE-2.0
 
-Native loading for the generated deterministic DSA (sparse attention + lightning indexer) training kernels (SM100a / SM103a).
+Native loading for the generated deterministic DSA (sparse attention + lightning indexer) training kernels (SM100a /
+SM103a / SM107a).
 
 ``registry.json`` next to this file is written mechanically by the kernel generator: one record per
 stage with the argument plan, launch block, dynamic shared memory, the device/launcher source pair
 under ``csrc/`` and the compile flags. The kernels are register-MMA (``mma.sync`` / ``cp.async``)
 code without architecture-specific instructions, so one source set serves every listed architecture
 (``arches``); each stage builds on first use as a torch CUDA extension for the current device's
-architecture (``nvcc`` + ``ninja``; cached per architecture under ``TORCH_EXTENSIONS_DIR``).
+architecture (``nvcc`` + ``ninja``; cached per architecture under ``TORCH_EXTENSIONS_DIR``). SM107a has
+no export of its own: it compiles the SM103a records (:data:`EXPORT_ARCH`) for ``compute_107a``, with
+a CUDA 13.4 or newer nvcc (``miles_ext_kernels.cake_native.MIN_CUDA``).
 """
 
 import json
@@ -20,13 +23,18 @@ from pathlib import Path
 
 import torch
 
+from .. import cake_native
+
 _PACKAGE = Path(__file__).resolve().parent
 _CSRC = _PACKAGE / "csrc"
 _ARCH_FLAGS = {
     "sm_100a": "-gencode=arch=compute_100a,code=sm_100a",
     "sm_103a": "-gencode=arch=compute_103a,code=sm_103a",
+    "sm_107a": "-gencode=arch=compute_107a,code=sm_107a",
 }
-SUPPORTED_CAPABILITIES = {(10, 0): "sm_100a", (10, 3): "sm_103a"}
+SUPPORTED_CAPABILITIES = {(10, 0): "sm_100a", (10, 3): "sm_103a", (10, 7): "sm_107a"}
+# architecture -> the exported architecture whose records it compiles
+EXPORT_ARCH = {"sm_107a": "sm_103a"}
 # torch's extension build disables the half / bf16 conversion operators; the generated device code uses them.
 _CONVERSION_FLAGS = (
     "-U__CUDA_NO_HALF_OPERATORS__",
@@ -44,13 +52,17 @@ def _load_registry() -> dict:
 
 
 # MODULES[stage] -> generated module record (from registry.json); record["arches"] lists the
-# architectures the source set is exported for.
+# architectures the source set is exported for, and an EXPORT_ARCH architecture builds its export's.
 MODULES = _load_registry()
+
+
+def _exported(stage, arch):
+    return EXPORT_ARCH.get(arch, arch) in MODULES[stage]["arches"]
 
 
 def _record(stage, arch):
     record = MODULES[stage]
-    if arch not in record["arches"]:
+    if not _exported(stage, arch):
         raise NotImplementedError(f"{stage}: not exported for {arch} (exported: {record['arches']})")
     return record
 
@@ -62,8 +74,16 @@ def device_arch(device=None):
         return SUPPORTED_CAPABILITIES[capability]
     except KeyError:
         raise NotImplementedError(
-            f"the deterministic DSA (sparse attention + lightning indexer) training kernels require SM100a or SM103a, got {capability}"
+            f"the deterministic DSA (sparse attention + lightning indexer) training kernels require SM100a, SM103a or SM107a, got {capability}"
         ) from None
+
+
+def _check_toolkit(arch):
+    """Raise ``RuntimeError`` unless the nvcc of torch's extension builds compiles ``arch`` (SM107a: CUDA 13.4)."""
+    from torch.utils.cpp_extension import CUDA_HOME
+
+    nvcc = None if CUDA_HOME is None else str(Path(CUDA_HOME) / "bin" / "nvcc")
+    cake_native.check_toolkit(arch, "the deterministic DSA training kernels", nvcc)
 
 
 @cache
@@ -72,6 +92,7 @@ def load(stage, arch):
     from torch.utils.cpp_extension import load as load_extension
 
     record = _record(stage, arch)
+    _check_toolkit(arch)
     return load_extension(
         name=f"{record['name']}_{arch}",
         sources=[str(_CSRC / relative) for relative in record["sources"]],
@@ -94,7 +115,7 @@ def prebuild(arch, max_workers=None):
     import time
     from concurrent.futures import ThreadPoolExecutor
 
-    stages = [stage for stage, record in MODULES.items() if arch in record["arches"]]
+    stages = [stage for stage in MODULES if _exported(stage, arch)]
     t0 = time.perf_counter()
     workers = max_workers or min(len(stages), max(1, (os.cpu_count() or 8) // 2))
     with ThreadPoolExecutor(max_workers=workers) as pool:

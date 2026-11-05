@@ -5,7 +5,7 @@ The cases are miles' tensor-parallel-local shapes: the MLA q-absorb and value pr
 GLM-5.3-Flash at 8, 16 and 64 local heads, with the weights as splits of ``linear_kv_up_proj.weight`` and the q-absorb
 input as a slice of the wider q head, and DeepSeek-V4's output-group projection at 1, 2 and 8 local groups; odd token
 counts throughout. Then the vendored package's own MLA, strided-view and output-layout cases, and the prebuild hook.
-Needs a CUDA device; the tests need SM100a / SM103a and skip elsewhere.
+Needs a CUDA device; the tests need SM100a / SM103a / SM107a and skip elsewhere.
 """
 
 import pytest
@@ -23,7 +23,7 @@ from miles_ext_kernels.dense_gemm import (  # noqa: E402
 )
 
 if torch.cuda.get_device_capability() not in SUPPORTED_CAPABILITIES:
-    pytest.skip("the Cake dense projection GEMMs need SM100a / SM103a", allow_module_level=True)
+    pytest.skip("the Cake dense projection GEMMs need SM100a / SM103a / SM107a", allow_module_level=True)
 
 SEED = 20260930
 BF16_ATOL = BF16_RTOL = 1e-2

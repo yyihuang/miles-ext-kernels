@@ -8,7 +8,7 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from miles_ext_kernels import _variant  # noqa: E402
-from miles_ext_kernels.dsa import _kernels, ops  # noqa: E402
+from miles_ext_kernels.dsa import _jit, _kernels, ops  # noqa: E402
 
 TC_STAGES = {f"dsa_attention_fwd_tc_h{h}_d512t{t}" for h in (8, 16, 32, 64) for t in (64, 0)}
 TC_BWD_STAGES = {f"dsa_attention_bwd_tc_h{h}_d512t{t}" for h in (8, 16, 32, 64) for t in (64, 0)}
@@ -20,7 +20,7 @@ def test_the_indexer_backward_selects_the_tcgen05_stage_for_32_and_64_heads(monk
     monkeypatch.setattr(_kernels, "INDEXER_BWD_TC", True)
     assert _kernels.INDEXER_TC_BWD_HEADS == (32, 64)
     assert _kernels.INDEXER_TC_BWD_MIN_TOPK == {32: 1024, 64: 0}
-    for arch in ("sm_100a", "sm_103a"):
+    for arch in ("sm_100a", "sm_103a", "sm_107a"):
         assert _kernels.indexer_tc_bwd_stage(32, 2048, arch) == "dsa_indexer_bwd_tc_h32"
         assert _kernels.indexer_tc_bwd_stage(32, 1024, arch) == "dsa_indexer_bwd_tc_h32"
         assert _kernels.indexer_tc_bwd_stage(64, 512, arch) == "dsa_indexer_bwd_tc_h64"
@@ -38,7 +38,7 @@ def test_the_indexer_backward_selects_the_tcgen05_stage_for_32_and_64_heads(monk
 
 def test_the_attention_backward_selects_the_tcgen05_stages_for_8_16_32_and_64_heads(monkeypatch):
     monkeypatch.setattr(_kernels, "ATTENTION_BWD_TC", True)
-    for arch in ("sm_100a", "sm_103a"):
+    for arch in ("sm_100a", "sm_103a", "sm_107a"):
         for heads in (8, 16, 32, 64):
             for tail in (64, 0):
                 stage = _kernels.attention_tc_bwd_stage(heads, tail, arch)
@@ -57,7 +57,7 @@ def test_the_attention_backward_selects_the_tcgen05_stages_for_8_16_32_and_64_he
 def test_the_attention_forward_and_indexer_logits_select_the_tcgen05_stages(monkeypatch):
     monkeypatch.setattr(_kernels, "ATTENTION_TC", True)
     monkeypatch.setattr(_kernels, "INDEXER_TC", True)
-    for arch in ("sm_100a", "sm_103a"):
+    for arch in ("sm_100a", "sm_103a", "sm_107a"):
         for heads in (8, 16, 32, 64):
             for tail in (64, 0):
                 assert _kernels.attention_tc_stage(heads, tail, arch) in TC_STAGES
@@ -72,6 +72,16 @@ def test_the_attention_forward_and_indexer_logits_select_the_tcgen05_stages(monk
     assert _kernels.attention_tc_stage(64, 0, "sm_100a") is None
     assert _kernels.indexer_tc_stage(32, "sm_100a") is None
     assert _kernels.attention_block_h(64) == 32 and _kernels.attention_head_blocks(64) == 2
+
+
+def test_sm107a_compiles_every_sm103a_record_for_compute_107a():
+    assert _jit.SUPPORTED_CAPABILITIES[(10, 7)] == "sm_107a"
+    assert _jit.EXPORT_ARCH == {"sm_107a": "sm_103a"}
+    assert "compute_107a" in _jit._ARCH_FLAGS["sm_107a"]
+    for stage, record in _jit.MODULES.items():
+        assert _jit._record(stage, "sm_107a") is _jit._record(stage, "sm_103a") is record, stage
+    with pytest.raises(NotImplementedError, match="not exported for sm_90a"):
+        _jit._record("dsa_indexer_clean", "sm_90a")
 
 
 @pytest.mark.parametrize("d_qk", [576, 512], ids=["rope", "nope"])

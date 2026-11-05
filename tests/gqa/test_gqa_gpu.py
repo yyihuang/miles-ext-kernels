@@ -1,4 +1,4 @@
-"""Packed causal GQA attention (``miles_ext_kernels.gqa``) on SM100a / SM103a.
+"""Packed causal GQA attention (``miles_ext_kernels.gqa``) on SM100a / SM103a / SM107a.
 
 Against an FP64 reference of the same BF16 inputs, on FlashInfer's suite layouts (unequal lengths, tails that are no
 multiple of a tile, keys fewer than queries, empty segments, long keys) and on the tensor-parallel-local head pairs
@@ -7,7 +7,7 @@ LSE and every gradient within FlashInfer's declared budget, rows that see no key
 the LSE and dK / dV are bitwise and dQ is within one BF16 step of its FP32 reordering. Also: document isolation,
 non-reentrant and reentrant checkpointing, no device synchronization in steady state, the rejected operands and
 devices, and the prebuild hook covering every library a forward and backward load, without importing FlashInfer.
-Needs a B200 / GB200 or B300 / GB300 and skips elsewhere.
+Needs a B200 / GB200, B300 / GB300 or R200 and skips elsewhere.
 """
 
 import math
@@ -24,6 +24,7 @@ if not torch.cuda.is_available():
 
 from torch.utils.checkpoint import checkpoint  # noqa: E402
 
+from miles_ext_kernels import cake_native  # noqa: E402
 from miles_ext_kernels.gqa import ops  # noqa: E402
 
 if tuple(torch.cuda.get_device_capability()) not in ops.SUPPORTED_CAPABILITIES:
@@ -301,10 +302,14 @@ def test_rejects_unsupported_operands(device):
 def test_device_arch_names_this_device_and_rejects_others(monkeypatch, device):
     capability = tuple(torch.cuda.get_device_capability(device))
     assert ops.device_arch(device) == ops.SUPPORTED_CAPABILITIES[capability]
-    for other in ((9, 0), (10, 7), (12, 0)):
+    for other in ((9, 0), (10, 1), (12, 0)):
         monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device=None, other=other: other)
-        with pytest.raises(RuntimeError, match="SM100a or SM103a"):
+        with pytest.raises(RuntimeError, match="SM100a, SM103a or SM107a"):
             ops.device_arch()
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device=None: (10, 7))
+    monkeypatch.setattr(cake_native, "MIN_CUDA", {**cake_native.MIN_CUDA, "sm_107a": (99, 0)})
+    with pytest.raises(RuntimeError, match=r"attention kernels for sm_107a needs CUDA 99\.0 or newer"):
+        ops.device_arch()
 
 
 _LOADS = """

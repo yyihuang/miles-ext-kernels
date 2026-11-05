@@ -3,14 +3,16 @@ Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
 Licensed under the Apache License, Version 2.0.
 https://www.apache.org/licenses/LICENSE-2.0
 
-Packed causal GQA attention, head dimension 256, forward and backward on the vendored Cake kernels (SM100a / SM103a).
+Packed causal GQA attention, head dimension 256, forward and backward on the vendored Cake kernels (SM100a / SM103a /
+SM107a).
 
 ``q [T_q, H_q, 256]``, ``k`` / ``v [T_k, H_kv, 256]`` (BF16, ``H_q / H_kv`` even), segments packed by int32 device
 ``cu_seqlens_q`` / ``cu_seqlens_k``; query row ``i`` of a segment with ``q_len`` rows and ``k_len`` keys sees the keys
 ``j <= i + k_len - q_len`` (FlashAttention's bottom-right alignment). These are the semantics of FlashInfer's
 ``flashinfer.gqa_train.varlen_gqa_attention``: its backend package is vendored byte-identical under
 ``_vendor/cake_gqa_train`` and builds its libraries through :mod:`miles_ext_kernels.cake_native` (nvcc and tvm-ffi,
-no FlashInfer). The kernels read no tensor on the host and never synchronize the device.
+no FlashInfer). The kernels read no tensor on the host and never synchronize the device. SM107a needs a CUDA 13.4 or
+newer toolkit to build them.
 
 Numerics: FP32 accumulation throughout, P and dS rounded to BF16 only as MMA operands. The output, the LSE and the
 BF16 dK / dV are bit-identical run to run. dQ is summed in FP32 with atomic adds, one partial per 128-key block, in a
@@ -39,7 +41,7 @@ __all__ = [
 ]
 
 HEAD_DIM = 256
-SUPPORTED_CAPABILITIES = {(10, 0): "sm_100a", (10, 3): "sm_103a"}
+SUPPORTED_CAPABILITIES = dict(cake_native.ARCH_BY_CAPABILITY)
 # The stages one forward and backward of :func:`varlen_gqa_attention` launch (BF16 dK / dV), in launch order.
 STAGES = ("fwd", "bwd_pre", "bwd_bf16", "bwd_post")
 
@@ -54,15 +56,18 @@ def backend() -> ModuleType:
 
 
 def device_arch(device=None) -> str:
-    """The architecture tag of a CUDA device (default: the current one); ``RuntimeError`` on another GPU."""
+    """The architecture tag of a CUDA device (default: the current one); ``RuntimeError`` on another GPU, or when the
+    toolkit cannot build the device's kernels (SM107a needs CUDA 13.4 or newer)."""
     capability = tuple(torch.cuda.get_device_capability(device))
     try:
-        return SUPPORTED_CAPABILITIES[capability]
+        arch = SUPPORTED_CAPABILITIES[capability]
     except KeyError:
         raise RuntimeError(
-            "the Cake GQA training attention kernels run on SM100a or SM103a (B200 / GB200, B300 / GB300), "
-            f"not on capability {capability}"
+            "the Cake GQA training attention kernels run on SM100a, SM103a or SM107a (B200 / GB200, B300 / GB300, "
+            f"R200), not on capability {capability}"
         ) from None
+    cake_native.check_toolkit(arch, "the Cake GQA training attention kernels")
+    return arch
 
 
 _device_arch = functools.cache(device_arch)  # per device index, on the call path

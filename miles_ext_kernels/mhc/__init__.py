@@ -3,7 +3,8 @@ Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
 Licensed under the Apache License, Version 2.0.
 https://www.apache.org/licenses/LICENSE-2.0
 
-Cake four-stream mHC (manifold-constrained hyper-connection) training kernels for Blackwell (SM100a / SM103a).
+Cake four-stream mHC (manifold-constrained hyper-connection) training kernels for SM100a / SM103a / SM107a
+(SM107a at hidden 4096 only).
 
 One connection of a layer is ``U, handle = mhc_prepare(X, fn, scale, base)`` (the RMS-normalised mapping GEMM, the
 pre / post / Sinkhorn coefficients and the stream collapse ``U``), the layer's branch on ``U``, then
@@ -33,6 +34,7 @@ _LAZY = {
     "mhc_head": ".ops",
     "mhc_prepare": ".ops",
     "prebuild": ".ops",
+    "supported_hidden_sizes": ".ops",
 }
 
 __all__ = sorted(_LAZY)

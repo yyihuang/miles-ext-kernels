@@ -3,7 +3,8 @@ Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
 Licensed under the Apache License, Version 2.0.
 https://www.apache.org/licenses/LICENSE-2.0
 
-Deterministic packed KDA chunked training on the vendored Cake package ``cake_kda_det_train`` (SM100a / SM103a).
+Deterministic packed KDA chunked training on the vendored Cake package ``cake_kda_det_train`` (SM100a / SM103a /
+SM107a).
 
 :func:`chunk_kda`, :func:`chunk_kda_fwd` and :func:`chunk_kda_bwd` are FlashInfer's thin entry points
 (``flashinfer/cake_kda_det_train.py``: ``chunk_kda_det``, ``chunk_kda_det_fwd``, ``chunk_kda_det_bwd``) without its
@@ -218,8 +219,8 @@ def device_arch(device: torch.device | str | int | None = None) -> str:
     arch = cake_jit.arch_for_capability(capability)
     if arch is None:
         raise RuntimeError(
-            f"the Cake KDA kernels need a Blackwell GPU of compute capability 10.0 or 10.3 (SM100a / SM103a; 10.7 "
-            f"with a CUDA 13.4 toolkit); device {index} has {capability[0]}.{capability[1]}"
+            f"the Cake KDA kernels need a GPU of compute capability 10.0, 10.3 or 10.7 (SM100a / SM103a / SM107a; "
+            f"SM107a with a CUDA 13.4 or newer toolkit); device {index} has {capability[0]}.{capability[1]}"
         )
     need = _min_cuda(arch)
     cuda = cake_native.get_cuda_version()
