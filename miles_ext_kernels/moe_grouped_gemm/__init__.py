@@ -3,7 +3,7 @@ Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
 Licensed under the Apache License, Version 2.0.
 https://www.apache.org/licenses/LICENSE-2.0
 
-Cake ragged BF16 MoE grouped GEMM for Blackwell (SM100a / SM103a): the expert projections of a routed MoE layer,
+Cake ragged BF16 MoE grouped GEMM for SM100a / SM103a / SM107a: the expert projections of a routed MoE layer,
 ``Y[offs[e-1]:offs[e]] = X[offs[e-1]:offs[e]] @ W[e].T``, with the input and weight gradients, as
 ``torch._grouped_mm`` computes them.
 
