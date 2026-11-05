@@ -66,7 +66,7 @@ def _package(revision: str) -> dict[str, bytes]:
             "sha256": {"csrc/prog.cu": hashlib.sha256(kernel).hexdigest()},
             "sources": ["csrc/prog.cu"],
         }
-        for arch in ("sm_100a", "sm_103a")
+        for arch in ("sm_100a", "sm_103a", "sm_107a")
     ]
     build = {
         "schema": "cake-build/1",
@@ -194,7 +194,7 @@ def test_the_checker_reports_a_source_that_differs_from_build_json(vendored):
 
     assert vendor_cake.check_family(vendored) == [
         f"synth/_vendor/cake/cake_synth_fast/csrc/prog.cu: sha256 differs from build.json (prog_{arch})"
-        for arch in ("sm_100a", "sm_103a")
+        for arch in ("sm_100a", "sm_103a", "sm_107a")
     ]
 
 
@@ -202,7 +202,7 @@ def test_the_checker_reports_a_source_that_differs_from_build_json(vendored):
     ("edit", "finding"),
     [
         (lambda build: build.update(schema="cake-build/2"), "schema 'cake-build/2'"),
-        (lambda build: build["libraries"].pop(), "no libraries for sm_103a"),
+        (lambda build: build["libraries"].pop(), "no libraries for sm_107a"),
         (lambda build: build["generator"].update(cake_revision="e" * 40), "cake_revision"),
     ],
 )

@@ -19,9 +19,9 @@ Under `--use-miles-ext-kernels`, miles calls `miles_ext_kernels.add_arguments(pa
 
 | package | miles backend switch | arguments | GPUs | tests |
 |---|---|---|---|---|
-| `gdn` (chunked gated delta rule, forward + backward: `det` is the bit-deterministic render, the only variant with context parallelism; `fast` is the vendored Cake non-deterministic package `cake_gdn_train`, fixed-order, so it repeats bit for bit and `--deterministic-mode` allows an explicit `fast`; a `cp_context` call runs `det`) | `--linear-attention-backend cake` | `--cake-gdn-variant {det,fast}`, `--cake-gdn-recompute-state` | SM100a / SM103a | `tests/gdn` (CPU; `test_gdn_wiring.py`, `test_fla_parity.py` and `test_gdn_fast_gpu.py` need CUDA) |
-| `kda` (deterministic packed KDA chunked forward + backward: raw forget gate and q/k L2 norm in the kernels, 1-64 heads) | `--kda-backend cake` | none | SM100a / SM103a | `tests/kda` (CPU; `test_kda_gpu.py` needs CUDA, its fla parity rows need fla) |
-| `conv1d` (packed causal depthwise conv1d + SiLU, kernel size 4: the GDN / KDA short convs; det + fast) | `--linear-attention-conv-backend cake` | `--cake-conv1d-variant {det,fast}`, `--cake-conv1d-silu-grad-preactivation {bf16,fp32}` | SM100a / SM103a | `tests/conv1d` (CPU; `test_conv1d_gpu.py` needs CUDA) |
+| `gdn` (chunked gated delta rule, forward + backward: `det` is the bit-deterministic render, the only variant with context parallelism; `fast` is the vendored Cake non-deterministic package `cake_gdn_train`, fixed-order, so it repeats bit for bit and `--deterministic-mode` allows an explicit `fast`; a `cp_context` call runs `det`) | `--linear-attention-backend cake` | `--cake-gdn-variant {det,fast}`, `--cake-gdn-recompute-state` | SM100a / SM103a / SM107a | `tests/gdn` (CPU; `test_gdn_wiring.py`, `test_fla_parity.py` and `test_gdn_fast_gpu.py` need CUDA) |
+| `kda` (deterministic packed KDA chunked forward + backward: raw forget gate and q/k L2 norm in the kernels, 1-64 heads) | `--kda-backend cake` | none | SM100a / SM103a / SM107a | `tests/kda` (CPU; `test_kda_gpu.py` needs CUDA, its fla parity rows need fla) |
+| `conv1d` (packed causal depthwise conv1d + SiLU, kernel size 4: the GDN / KDA short convs; det + fast) | `--linear-attention-conv-backend cake` | `--cake-conv1d-variant {det,fast}`, `--cake-conv1d-silu-grad-preactivation {bf16,fp32}` | SM100a / SM103a / SM107a | `tests/conv1d` (CPU; `test_conv1d_gpu.py` needs CUDA) |
 | `gated_rmsnorm` (RMSNorm(x) * w * SiLU(z) over rows of 128: the GDN output norm; det + fast) | `--linear-attention-output-norm-backend cake` | `--cake-gated-rmsnorm-variant {det,fast}` | SM100a / SM103a | `tests/gated_rmsnorm` (CPU; `test_gated_rmsnorm_gpu.py` needs CUDA) |
 
 A package that ships two variants takes `--cake-<kernel>-variant {det,fast}`: `det` is bit-deterministic, `fast` is
@@ -46,6 +46,10 @@ families that vendor, so the commit that vendors a family adds it there.
 `miles_ext_kernels.cake_native` builds a package's libraries from its `build.json` with nvcc and loads them with
 tvm-ffi (`apache-tvm-ffi>=0.1.11,<0.2`); FlashInfer itself is not needed. Libraries are cached under
 `${TVM_FFI_CACHE_DIR:-~/.cache/tvm-ffi}/miles_ext_kernels/`, never in the package directory.
+
+SM107a needs a CUDA 13.4 or newer nvcc (`cake_native.MIN_CUDA`): a CUDA 13.0 toolkit builds the SM100a and SM103a
+kernels only, and an SM107a build under it fails with an error naming the toolkit it needs. The generated kernels
+built as torch extensions follow the same rule with torch's nvcc (`CUDA_HOME`).
 
 One rank builds each library under a file lock next to it; the others wait, log every 30 s and fail after
 30 minutes. On a filesystem whose locks are cluster-wide, such as Lustre, a rank killed on another node can leave
